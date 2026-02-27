@@ -691,8 +691,18 @@ class FeishuChannel(BaseChannel):
             chat_type = message.chat_type
             msg_type = message.message_type
 
+            # zz 如果 not allowed 无需 reaction
+            if not self.is_allowed(sender_id=sender_id):
+                logger.warning(
+                    "Access denied for sender {} on channel {}. "
+                    "Add them to allowFrom list in config to grant access.",
+                    sender_id, self.name,
+                )
+                return
+
+            # zz THUMBSUP 改为 OK
             # Add reaction
-            await self._add_reaction(message_id, "THUMBSUP")
+            await self._add_reaction(message_id, "OK")
 
             # Parse content
             content_parts = []

@@ -104,6 +104,10 @@ class SubagentManager:
             tools.register(WebSearchTool(api_key=self.brave_api_key))
             tools.register(WebFetchTool())
             
+            # zz: 重新调整Tool Call Hint文本内容
+            from nanobot.agent.tools.k8s.tool import GetK8sKubeConfigFilePath
+            self.tools.register(GetK8sKubeConfigFilePath())
+
             # Build messages with subagent-specific prompt
             system_prompt = self._build_subagent_prompt(task)
             messages: list[dict[str, Any]] = [

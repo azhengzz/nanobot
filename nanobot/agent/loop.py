@@ -123,6 +123,10 @@ class AgentLoop:
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
 
+        # zz 自定义工具
+        from nanobot.agent.tools.k8s.tool import GetK8sKubeConfigFilePath
+        self.tools.register(GetK8sKubeConfigFilePath())
+
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
         if self._mcp_connected or self._mcp_connecting or not self._mcp_servers:
@@ -159,14 +163,23 @@ class AgentLoop:
             return None
         return re.sub(r"<think>[\s\S]*?</think>", "", text).strip() or None
 
+    # @staticmethod
+    # def _tool_hint(tool_calls: list) -> str:
+    #     """Format tool calls as concise hint, e.g. 'web_search("query")'."""
+    #     def _fmt(tc):
+    #         val = next(iter(tc.arguments.values()), None) if tc.arguments else None
+    #         if not isinstance(val, str):
+    #             return tc.name
+    #         return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
+    #     return ", ".join(_fmt(tc) for tc in tool_calls)
+    
+    # zz: 重新调整Tool Call Hint文本内容
     @staticmethod
     def _tool_hint(tool_calls: list) -> str:
         """Format tool calls as concise hint, e.g. 'web_search("query")'."""
         def _fmt(tc):
-            val = next(iter(tc.arguments.values()), None) if tc.arguments else None
-            if not isinstance(val, str):
-                return tc.name
-            return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
+            args_str = json.dumps(tc.arguments, ensure_ascii=False)
+            return f'Tool call: {tc.name}({args_str[:200]}...)' if len(args_str) > 200 else f'Tool call: {tc.name}({args_str[:200]})'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
     async def _run_agent_loop(
