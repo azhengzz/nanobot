@@ -18,7 +18,6 @@ fi
 
 # Path to the actual script
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SCRIPT_PATH="$SCRIPT_DIR/kubectl-safe.sh"
 
 # Create kubectl-safe wrapper script
 WRAPPER_PATH="$BIN_DIR/kubectl-safe"
@@ -28,7 +27,7 @@ cat > "$WRAPPER_PATH" << EOF
 # This script wraps the actual kubectl-safe.sh implementation
 
 # Direct absolute path to the actual script
-ACTUAL_SCRIPT="$SCRIPT_PATH/kubectl-safe.sh"
+ACTUAL_SCRIPT="$SCRIPT_DIR/kubectl-safe.sh"
 
 if [ -f "$ACTUAL_SCRIPT" ]; then
     exec bash "$ACTUAL_SCRIPT" "$@"
