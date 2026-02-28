@@ -104,9 +104,11 @@ class SubagentManager:
             tools.register(WebSearchTool(api_key=self.brave_api_key))
             tools.register(WebFetchTool())
             
-            # zz: 重新调整Tool Call Hint文本内容
+            # zz: 自定义工具
             from nanobot.agent.tools.k8s.tool import GetK8sKubeConfigFilePath
             self.tools.register(GetK8sKubeConfigFilePath())
+            from nanobot.agent.tools.ssh.tool import SSHCommand
+            self.tools.register(SSHCommand())
 
             # Build messages with subagent-specific prompt
             system_prompt = self._build_subagent_prompt(task)
