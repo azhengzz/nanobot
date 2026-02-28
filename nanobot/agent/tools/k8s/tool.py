@@ -26,8 +26,8 @@ class GetK8sKubeConfigFilePath(Tool):
 
     async def execute(self, **kwargs) -> str:
         """Execute the tool to return all kubeconfig paths with aliases."""
-        from nanobot.agent.tools.k8s.env import KbiubeConfigPath
+        from nanobot.agent.tools.k8s.env import KubeConfigPath
 
-        return json.dumps(KbiubeConfigPath, ensure_ascii=False, indent=2)
+        return json.dumps(KubeConfigPath, ensure_ascii=False, indent=2)
         
 
