@@ -22,24 +22,18 @@ SCRIPT_PATH="$SCRIPT_DIR/kubectl-safe.sh"
 
 # Create kubectl-safe wrapper script
 WRAPPER_PATH="$BIN_DIR/kubectl-safe"
-cat > "$WRAPPER_PATH" << 'EOF'
+cat > "$WRAPPER_PATH" << EOF
 #!/bin/bash
 # kubectl-safe wrapper script
 # This script wraps the actual kubectl-safe.sh implementation
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Find the actual script relative to this wrapper's location
-ACTUAL_SCRIPT="$(dirname "$(readlink "$0" 2>/dev/null || echo "$0")")/../../nanobot/skills/kubernetes/scripts/kubectl-safe.sh"
-
-if [ ! -f "$ACTUAL_SCRIPT" ]; then
-    # Try absolute path from nanobot project
-    ACTUAL_SCRIPT="$SCRIPT_DIR/nanobot/skills/kubernetes/scripts/kubectl-safe.sh"
-fi
+# Direct absolute path to the actual script
+ACTUAL_SCRIPT="$SCRIPT_PATH/kubectl-safe.sh"
 
 if [ -f "$ACTUAL_SCRIPT" ]; then
     exec bash "$ACTUAL_SCRIPT" "$@"
 else
-    echo "Error: Cannot find kubectl-safe.sh implementation" >&2
+    echo "Error: Cannot find kubectl-safe.sh at \$ACTUAL_SCRIPT" >&2
     exit 1
 fi
 EOF
