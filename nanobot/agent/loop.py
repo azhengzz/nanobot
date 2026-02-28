@@ -232,8 +232,11 @@ class AgentLoop:
                 for tool_call in response.tool_calls:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
-                    logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
+                    # zz 调整打印日志
+                    logger.info("Tool Call: ID {} Name {}({})", tool_call.id, tool_call.name, args_str[:200])
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    # zz 新增Tool结果日志打印
+                    logger.info("Tool Response: ID {} Name {} Result: {}", tool_call.id, tool_call.name, result[:500])
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
