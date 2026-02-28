@@ -134,10 +134,11 @@ class SSHCommand(Tool):
                     known_hosts=None  # 禁用主机密钥检查（仅用于测试环境）
                 )
                 update_connection_by_key(key=connection_key, conn=conn)
-                # 更新SSH访问信息到env.json中进行缓存
-                await update_ssh_access_info(ip=ip, port=port, username=username, password=password)
             except Exception as e:
                 return json.dumps({"stdout": [], "stderr": [f"Connection failed: {str(e)}"]}, ensure_ascii=False)
+            
+        # 更新SSH访问信息到env.json中进行缓存
+        await update_ssh_access_info(ip=ip, port=port, username=username, password=password)
 
         guard_error = self._guard_command(command)
         if guard_error:
