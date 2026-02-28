@@ -99,9 +99,11 @@ class SSHCommand(Tool):
 
     def __init__(
             self,
+            timeout: int = 60,
             deny_patterns: list[str] | None = None,
             allow_patterns: list[str] | None = None,
         ):
+        self.timeout = timeout
         # Copy From agent/tools/shell.py
         self.deny_patterns = deny_patterns or [
             r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
@@ -142,7 +144,7 @@ class SSHCommand(Tool):
             return guard_error
         try:
             # 异步执行命令
-            result = await conn.run(command)
+            result = await conn.run(command, timeout=self.timeout)
 
             outs = result.stdout.splitlines() if result.stdout else []
             errs = result.stderr.splitlines() if result.stderr else []
@@ -152,6 +154,8 @@ class SSHCommand(Tool):
                 "stderr": errs,
                 "exit_status": result.exit_status
             }, ensure_ascii=False)
+        except asyncssh.TimeoutError as e:
+            return json.dumps({"stdout": [], "stderr": [f"Error: Command timed out after {self.timeout} seconds"]}, ensure_ascii=False)
         except Exception as e:
             return json.dumps({"stdout": [], "stderr": [f"Command failed: {str(e)}"]}, ensure_ascii=False)
 
