@@ -29,8 +29,8 @@ cat > "$WRAPPER_PATH" << EOF
 # Direct absolute path to the actual script
 ACTUAL_SCRIPT="$SCRIPT_DIR/kubectl-safe.sh"
 
-if [ -f "$ACTUAL_SCRIPT" ]; then
-    exec bash "$ACTUAL_SCRIPT" "$@"
+if [ -f "\$ACTUAL_SCRIPT" ]; then
+    exec bash "\$ACTUAL_SCRIPT" "\$@"
 else
     echo "Error: Cannot find kubectl-safe.sh at \$ACTUAL_SCRIPT" >&2
     exit 1
