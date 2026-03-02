@@ -107,8 +107,9 @@ class SubagentManager:
             # zz: 自定义工具
             from nanobot.agent.tools.k8s.tool import GetK8sKubeConfigFilePath
             self.tools.register(GetK8sKubeConfigFilePath())
-            from nanobot.agent.tools.ssh.tool import SSHCommand
+            from nanobot.agent.tools.ssh.tool import SSHCommand, GetSSHAccessInfo
             self.tools.register(SSHCommand())
+            self.tools.register(GetSSHAccessInfo())
 
             # Build messages with subagent-specific prompt
             system_prompt = self._build_subagent_prompt(task)

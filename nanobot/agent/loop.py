@@ -126,8 +126,9 @@ class AgentLoop:
         # zz 自定义工具
         from nanobot.agent.tools.k8s.tool import GetK8sKubeConfigFilePath
         self.tools.register(GetK8sKubeConfigFilePath())
-        from nanobot.agent.tools.ssh.tool import SSHCommand
+        from nanobot.agent.tools.ssh.tool import SSHCommand, GetSSHAccessInfo
         self.tools.register(SSHCommand())
+        self.tools.register(GetSSHAccessInfo())
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
