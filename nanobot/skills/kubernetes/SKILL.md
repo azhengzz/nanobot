@@ -1,7 +1,6 @@
 ---
 name: kubernetes
-description: "Designs and manages Kubernetes deployments, services, configurations, and cluster resources. Trigger keywords: kubernetes, k8s, deployment, pod, service, helm, kubectl, cluster, ingress."
-always: true
+description: "Kubernetes cluster access via kubectl-safe wrapper. When users mention kubectl, k8s, or Kubernetes, I MUST use this skill's safe wrapper; direct kubectl usage is prohibited. keywords: kubernetes, k8s, deployment, pod, service, helm, kubectl, cluster, ingress."
 metadata: {"nanobot":{"emoji":"☸️","requires":{"bins":["kubectl-safe"]},"os":["linux","darwin","win32"]}}
 ---
 
