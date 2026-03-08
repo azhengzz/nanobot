@@ -12,7 +12,7 @@ if (-not (Test-Path $binDir)) {
 }
 
 # Create kubectl-safe.bat file
-$scriptPath = "D:\WorkHome\git\github\nanobot\nanobot\skills\kubernetes\scripts\kubectl-safe.ps1"
+$scriptPath = Join-Path $PSScriptRoot "kubectl-safe.ps1"
 $batchContent = @"
 @echo off
 set "SCRIPT=$scriptPath"
