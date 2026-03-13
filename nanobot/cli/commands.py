@@ -311,6 +311,12 @@ def gateway(
 
     config = _load_runtime_config(config, workspace)
 
+    # zz: Inject Feishu credentials to environment for Skill scripts
+    if config.channels.feishu.app_id and config.channels.feishu.app_secret:
+        os.environ["FEISHU_APP_ID"] = config.channels.feishu.app_id
+        os.environ["FEISHU_APP_SECRET"] = config.channels.feishu.app_secret
+        console.print("[dim]Feishu credentials injected to environment for Skills[/dim]")
+
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
