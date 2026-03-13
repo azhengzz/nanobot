@@ -1,6 +1,6 @@
 ---
 name: feishu-doc
-description: Operate Feishu DocX documents via CLI. Commands include read, list_blocks, get_block, create. Use when the user mentions DocX, documents, or /docx/ links.
+description: Operate Feishu DocX documents via CLI. Commands include read, list-blocks, get-block, create. Use when the user mentions DocX, documents, or /docx/ links.
 ---
 
 # Feishu Doc Skill
@@ -17,8 +17,8 @@ python scripts/feishu_doc.py --app-id <ID> --app-secret <SECRET> <COMMAND> [opti
 
 | Command | Options | Description |
 |---------|---------|-------------|
-| `read` | `--document-id` or `--url` | Read document content |
-| `list-blocks` | `--document-id` or `--url`, `--page-size` | List all blocks in document |
+| `read` | `--document-id` or `--url` | Read document raw content |
+| `list-blocks` | `--document-id` or `--url`, `--page-size` | List document blocks |
 | `get-block` | `--document-id` or `--url`, `--block-id` (required) | Get specific block details |
 | `create` | `--title` (required), `--content`, `--folder-token` | Create new document |
 
@@ -29,13 +29,39 @@ python scripts/feishu_doc.py --app-id <ID> --app-secret <SECRET> <COMMAND> [opti
 - `--app-secret`: Feishu app secret (can use env var `FEISHU_APP_SECRET`)
 
 ### Command-Specific Options
-- `--document-id`: Document ID
-- `--url`: DocX URL to extract token from
-- `--title`: Document title (required for `create`)
-- `--content`: Initial content (for `create`)
-- `--folder-token`: Folder token to create document in (for `create`)
-- `--block-id`: Block ID (required for `get_block`)
-- `--page-size`: Number of results per page for `list_blocks` (default: 200)
+
+#### `read` command
+| Option | Required | Description |
+|--------|----------|-------------|
+| `--document-id` | No* | Document ID |
+| `--url` | No* | DocX URL to extract token from |
+
+*Either `--document-id` or `--url` must be provided.
+
+#### `list-blocks` command
+| Option | Required | Description |
+|--------|----------|-------------|
+| `--document-id` | No* | Document ID |
+| `--url` | No* | DocX URL to extract token from |
+| `--page-size` | No | Number of results per page (default: 200) |
+
+*Either `--document-id` or `--url` must be provided.
+
+#### `get-block` command
+| Option | Required | Description |
+|--------|----------|-------------|
+| `--document-id` | No* | Document ID |
+| `--url` | No* | DocX URL to extract token from |
+| `--block-id` | Yes | Block ID to retrieve |
+
+*Either `--document-id` or `--url` must be provided.
+
+#### `create` command
+| Option | Required | Description |
+|--------|----------|-------------|
+| `--title` | Yes | Document title |
+| `--content` | No | Initial content (default: empty) |
+| `--folder-token` | No | Folder token to create document in |
 
 ## Examples
 
@@ -47,10 +73,10 @@ python scripts/feishu_doc.py --app-id $APP_ID --app-secret $APP_SECRET read --do
 python scripts/feishu_doc.py --app-id $APP_ID --app-secret $APP_SECRET read --url "https://xxx.feishu.cn/docx/xxx"
 
 # List blocks
-python scripts/feishu_doc.py --app-id $APP_ID --app-secret $APP_SECRET list_blocks --document-id "doxxx"
+python scripts/feishu_doc.py --app-id $APP_ID --app-secret $APP_SECRET list-blocks --document-id "doxxx"
 
 # Get specific block
-python scripts/feishu_doc.py --app-id $APP_ID --app-secret $APP_SECRET get_block --document-id "doxxx" --block-id "xxx"
+python scripts/feishu_doc.py --app-id $APP_ID --app-secret $APP_SECRET get-block --document-id "doxxx" --block-id "xxx"
 
 # Create new document
 python scripts/feishu_doc.py --app-id $APP_ID --app-secret $APP_SECRET create --title "My Document"

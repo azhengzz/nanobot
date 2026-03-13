@@ -11,7 +11,8 @@ import click
 try:
     import lark_oapi as lark
     import lark_oapi.api.wiki.v2 as lark_wiki_v2
-    from lark_oapi.api.wiki.v1 import SearchNodeRequest, SearchNodeResponse, SearchNodeRequestBody
+    from lark_oapi.api.wiki.v2.model import Node
+    # from lark_oapi.api.wiki.v1 import SearchNodeRequest, SearchNodeResponse, SearchNodeRequestBody
     FEISHU_SDK_AVAILABLE = True
 except ImportError:
     FEISHU_SDK_AVAILABLE = False
@@ -56,6 +57,7 @@ def cli(ctx: click.Context, app_id: str, app_secret: str):
 @click.pass_context
 def spaces(ctx: click.Context):
     """List all wiki spaces accessible to the app."""
+    # 获取知识空间列表 https://open.feishu.cn/api-explorer/cli_a9c750e92b385bdd?apiName=list&from=op_doc_tab&project=wiki&resource=space&version=v2
     client = ctx.obj['client']
     request = lark_wiki_v2.ListSpaceRequest.builder().build()
     try:
@@ -72,6 +74,7 @@ def spaces(ctx: click.Context):
 @click.pass_context
 def nodes(ctx: click.Context, space_id: str, parent_node_token: str):
     """List wiki nodes in a space."""
+    # 获取知识空间子节点列表 https://open.feishu.cn/api-explorer/cli_a9c750e92b385bdd?apiName=list&from=op_doc_tab&project=wiki&resource=space.node&version=v2
     client = ctx.obj['client']
     request = lark_wiki_v2.ListSpaceNodeRequest.builder() \
         .space_id(space_id) \
@@ -91,6 +94,7 @@ def nodes(ctx: click.Context, space_id: str, parent_node_token: str):
 @click.pass_context
 def get(ctx: click.Context, token: Optional[str], url: Optional[str]):
     """Get wiki node details by token or URL."""
+    # 获取知识空间节点信息 https://open.feishu.cn/api-explorer/cli_a9c750e92b385bdd?apiName=get_node&from=op_doc_tab&project=wiki&resource=space&version=v2
     client = ctx.obj['client']
     node_token = token
     if not node_token and url:
@@ -108,6 +112,49 @@ def get(ctx: click.Context, token: Optional[str], url: Optional[str]):
     except Exception as e:
         output_result({"error": f"{e}"})
         return
+    output_response(response)
+
+
+
+@cli.command(help='Create a new wiki node')
+@click.option('--space-id', required=True, help='Wiki space ID')
+@click.option('--obj-type', required=True, type=click.Choice(['docx', 'sheet', 'mindnote', 'bitable', 'file', 'slides']),
+              default='docx', help='Document type, for shortcuts, this field represents the obj_type of the corresponding entity. (default: docx)')
+@click.option('--node-type', required=True, type=click.Choice(['origin', 'shortcut']),
+              default='origin', help='Node type (default: origin)')
+@click.option('--title', required=True, help='Node title')
+@click.option('--parent-node-token', default='', help='Parent node token (empty for top-level)')
+@click.option('--origin-node-token', type=str, help='The corresponding entity node_token for the shortcut. When the node is a shortcut, this value is not empty')
+@click.pass_context
+def create(ctx: click.Context, space_id: str, obj_type: str, node_type: str, title: str,
+           parent_node_token: str, origin_node_token: Optional[str]):
+    """Create a new wiki node."""
+    # 创建知识空间节点 https://open.feishu.cn/api-explorer/cli_a9c750e92b385bdd?apiName=create&from=op_doc_tab&project=wiki&resource=space.node&version=v2
+    client = ctx.obj['client']
+
+    # Build the request body with Node object
+    node_builder = Node.builder() \
+        .obj_type(obj_type) \
+        .node_type(node_type) \
+        .title(title)
+
+    # Add optional parameters
+    if parent_node_token:
+        node_builder.parent_node_token(parent_node_token)
+    if origin_node_token:
+        node_builder.origin_node_token(origin_node_token)
+
+    request: lark_wiki_v2.CreateSpaceNodeRequest = lark_wiki_v2.CreateSpaceNodeRequest.builder() \
+        .space_id(space_id) \
+        .request_body(node_builder.build()) \
+        .build()
+
+    try:
+        response: lark_wiki_v2.CreateSpaceNodeResponse = client.wiki.v2.space_node.create(request)
+    except Exception as e:
+        output_result({"error": f"{e}"})
+        return
+
     output_response(response)
 
 
