@@ -462,9 +462,11 @@ def gateway(
     port = port if port is not None else config.gateway.port
 
     # zz: Inject Feishu credentials to environment for Skill scripts
-    if config.channels.feishu.app_id and config.channels.feishu.app_secret:
-        os.environ["FEISHU_APP_ID"] = config.channels.feishu.app_id
-        os.environ["FEISHU_APP_SECRET"] = config.channels.feishu.app_secret
+    app_id = config.channels.feishu.get('appId')
+    app_secret = config.channels.feishu.get('appSecret')
+    if app_id and app_secret:
+        os.environ["FEISHU_APP_ID"] = app_id
+        os.environ["FEISHU_APP_SECRET"] = app_secret
         console.print("[dim]Feishu credentials injected to environment for Skills[/dim]")
 
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
