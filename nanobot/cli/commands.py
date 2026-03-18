@@ -469,7 +469,7 @@ def gateway(
         os.environ["FEISHU_APP_SECRET"] = app_secret
         console.print("[dim]Feishu credentials injected to environment for Skills[/dim]")
 
-    console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
+    console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
     provider = _make_provider(config)
