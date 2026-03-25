@@ -54,7 +54,7 @@ metadata: {"nanobot":{"emoji":"🛠","requires":{"bins":["jmeter"]},"os":["linux
 - `HTTP Request`：[跳转到 HTTP Request 组件说明](./references/samplers/HTTP%20Request.md)
 
 ### Configuration Elements
-
+- `HTTP Request Defaults`：[跳转到 HTTP Request Defaults 组件说明](./references/configuration%20elements/HTTP%20Request%20Defaults.md)
 
 ### Assertions
 

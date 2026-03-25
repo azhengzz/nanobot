@@ -65,6 +65,14 @@ Where `__functionName` matches the name of a function. Functions that require no
 | String | [urldecode](urldecode.md) | Decode a application/x-www-form-urlencoded string |
 | String | [urlencode](urlencode.md) | Encode a string to a application/x-www-form-urlencoded string |
 | String | [TestPlanName](TestPlanName.md) | Return name of current test plan |
+| String | [__O](ObjectVariable.md) | Extract values from object variables using JsonPath |
+| String | [__Oe](ObjectVariableEscape.md) | Extract and escape values from object variables using JsonPath |
+| Time | [__timePick](timePick.md) | Pick a specific day from week/month/year |
+| Time | [__timeToTimestamp](timeToTimestamp.md) | Convert date string to Unix timestamp |
+| File | [__FileToBase64](FileToBase64.md) | Read file and convert to Base64 string |
+| Calculation | [__aesEncrypt](aesEncrypt.md) | Encrypt string using AES algorithm |
+| Calculation | [__rsaEncrypt](rsaEncrypt.md) | Encrypt string using RSA algorithm |
+| Information | [__threadGroupActiveThreadNum](threadGroupActiveThreadNum.md) | Get active thread count in current thread group |
 
 ## Usage Notes
 
