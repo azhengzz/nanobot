@@ -7,15 +7,15 @@ The `HTTP Request Defaults` element is a configuration element that sets default
 This element is particularly useful when testing a single application, where all or most of the `HTTP requests` use the same server, port, protocol, or other common parameters.
 
 ## Parameters
-|Attribute|Description|Required|Example Value|
-|---|---|---|---|
-|HTTPSampler.protocol|Protocol|No|http or https or file, Default http|
-|HTTPSampler.domain|Domain name or IP address of the web server. E.g. www.example.com. Do not include the http:// prefix.|No|www.httpbin.org|
-|HTTPSampler.port|Port the web server is listening to.|No|80 or 443|
-|HTTPSampler.contentEncoding|The encoding to be used for the request.|No|utf-8|
-|HTTPSampler.path|The default path to resource. Individual samplers can override this value.|No|/api|
-|HTTPsampler.Arguments| - `Send Parameters With Request`: The query string will be generated from the list of parameters you provide. Each parameter has a name and value. The query string will be generated in the correct fashion, depending on the choice of "Method" you made (i.e. if you chose GET, the query string will be appended to the URL, if POST, then it will be sent separately). Also, if you are sending a file using a multipart form, the query string will be created using the multipart form specifications.<br> - `Send Files With Request`: Default files to be sent with each request.|No|See examples below|
-|HTTPSampler.postBodyRaw|Should be true if using `Send JSON Body Data` to send data by default|No|true or false|
+|Attribute|Required|Description|Not Null|Example Value|
+|---|---|---|---|---|
+|HTTPSampler.protocol|Yes|Protocol|No|http or https or file, Default http|
+|HTTPSampler.domain|Yes|Domain name or IP address of the web server. E.g. www.example.com. Do not include the http:// prefix.|No|www.httpbin.org|
+|HTTPSampler.port|Yes|Port the web server is listening to.|No|80 or 443|
+|HTTPSampler.contentEncoding|Yes|The encoding to be used for the request.|No|utf-8|
+|HTTPSampler.path|Yes|The default path to resource. Individual samplers can override this value.|No|/api|
+|HTTPsampler.Arguments|Yes| - `Send Parameters With Request`: The query string will be generated from the list of parameters you provide. Each parameter has a name and value. The query string will be generated in the correct fashion, depending on the choice of "Method" you made (i.e. if you chose GET, the query string will be appended to the URL, if POST, then it will be sent separately). Also, if you are sending a file using a multipart form, the query string will be created using the multipart form specifications.<br> - `Send Files With Request`: Default files to be sent with each request.|No|See examples below|
+|HTTPSampler.postBodyRaw|Yes|Should be true if using `Send JSON Body Data` to send data by default|No|true or false|
 
 
 ## Notes

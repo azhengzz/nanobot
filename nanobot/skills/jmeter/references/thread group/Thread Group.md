@@ -6,17 +6,17 @@ Thread Group（线程组）是 JMeter 测试计划的起点，用于定义虚拟
 
 
 ## 参数说明
-|Attribute|Description|Required|Example Value|
-|---|---|---|---|
-|ThreadGroup.on_sample_error|Determines what happens if a sampler error occurs, either because the sample itself failed or an assertion failed.|No|`continue` - ignore the error and continue with the test<br>`startnextloop` - ignore the error, start next loop and continue with the test<br>`stopthread` - current thread exits<br>`stoptest` - the entire test is stopped at the end of any current samples<br>`stoptestnow` - the entire test is stopped abruptly. Any current samplers are interrupted if possible.|
-|ThreadGroup.num_threads|Number of users to simulate|Yes|`10` (虚拟用户数)|
-|ThreadGroup.ramp_time|How long JMeter should take to get all the threads started. If there are 10 threads and a ramp-up time of 100 seconds, then each thread will begin 10 seconds after the previous thread started, for a total time of 100 seconds to get the test fully up to speed.|Yes|`5` (启动间隔时间)|
-|LoopController.continue_forever|Loop Forever|No|`false`|
-|LoopController.loops|Loop Count|Yes|`-1` 永久循环<br>`10` (循环次数)|
-|ThreadGroup.scheduler|If `true`, confines Thread operation time to the given bounds|No|`true` or `false` (是否启用调度器)|
-|ThreadGroup.delayedStart|If `true`, threads are created only when the appropriate proportion of the ramp-up time has elapsed. This is most appropriate for tests with a ramp-up time that is significantly longer than the time to execute a single thread. I.e. where earlier threads finish before later ones start.<br>If `false`, all threads are created when the test starts (they then pause for the appropriate proportion of the ramp-up time). This is the original default, and is appropriate for tests where threads are active throughout most of the test.|Yes|`true` or `false` (是否启用调度器)|
-|ThreadGroup.duration|If the scheduler is `true`, one can choose a relative end time. JMeter will use this to calculate the End Time.|No|`60` (持续时间)|
-|ThreadGroup.delay|If the scheduler is `true`, one can choose a relative startup delay. JMeter will use this to calculate the Start Time.|No|`0` (启动延迟)|
+|Attribute|Required|Description|Not Null|Example Value|
+|---|---|---|---|---|
+|ThreadGroup.on_sample_error|Yes|Determines what happens if a sampler error occurs, either because the sample itself failed or an assertion failed.|No|`continue` - ignore the error and continue with the test<br>`startnextloop` - ignore the error, start next loop and continue with the test<br>`stopthread` - current thread exits<br>`stoptest` - the entire test is stopped at the end of any current samples<br>`stoptestnow` - the entire test is stopped abruptly. Any current samplers are interrupted if possible.|
+|ThreadGroup.num_threads|Yes|Number of users to simulate|Yes|`10` (虚拟用户数)|
+|ThreadGroup.ramp_time|Yes|How long JMeter should take to get all the threads started. If there are 10 threads and a ramp-up time of 100 seconds, then each thread will begin 10 seconds after the previous thread started, for a total time of 100 seconds to get the test fully up to speed.|Yes|`5` (启动间隔时间)|
+|LoopController.continue_forever|Yes|Loop Forever|No|`false`|
+|LoopController.loops|Yes|Loop Count|Yes|`-1` 永久循环<br>`10` (循环次数)|
+|ThreadGroup.scheduler|Yes|If `true`, confines Thread operation time to the given bounds|No|`true` or `false` (是否启用调度器)|
+|ThreadGroup.delayedStart|Yes|If `true`, threads are created only when the appropriate proportion of the ramp-up time has elapsed. This is most appropriate for tests with a ramp-up time that is significantly longer than the time to execute a single thread. I.e. where earlier threads finish before later ones start.<br>If `false`, all threads are created when the test starts (they then pause for the appropriate proportion of the ramp-up time). This is the original default, and is appropriate for tests where threads are active throughout most of the test.|Yes|`true` or `false` (是否启用调度器)|
+|ThreadGroup.duration|Yes|If the scheduler is `true`, one can choose a relative end time. JMeter will use this to calculate the End Time.|No|`60` (持续时间)|
+|ThreadGroup.delay|Yes|If the scheduler is `true`, one can choose a relative startup delay. JMeter will use this to calculate the Start Time.|No|`0` (启动延迟)|
 
 
 ### 线程组类型
