@@ -453,9 +453,13 @@ def gateway(
     from nanobot.heartbeat.service import HeartbeatService
     from nanobot.session.manager import SessionManager
 
-    if verbose:
-        import logging
-        logging.basicConfig(level=logging.DEBUG)
+    # Configure loguru and logging levels based on verbose flag
+    import logging
+    from loguru import logger
+
+    logger.remove()
+    logger.add(sys.stderr, level="DEBUG" if verbose else "INFO")
+    logging.getLogger().setLevel(logging.DEBUG if verbose else logging.INFO)
 
     config = _load_runtime_config(config, workspace)
     _print_deprecated_memory_window_notice(config)
