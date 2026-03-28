@@ -312,11 +312,6 @@ class LiteLLMProvider(LLMProvider):
 
         tool_calls = []
         for tc in raw_tool_calls:
-            # Parse arguments from JSON string if needed
-            args = tc.function.arguments
-            if isinstance(args, str):
-                args = json_repair.loads(args)
-
             provider_specific_fields = getattr(tc, "provider_specific_fields", None) or None
             function_provider_specific_fields = (
                 getattr(tc.function, "provider_specific_fields", None) or None
@@ -325,7 +320,7 @@ class LiteLLMProvider(LLMProvider):
             tool_calls.append(ToolCallRequest(
                 id=_short_tool_id(),
                 name=tc.function.name,
-                arguments=args,
+                arguments=tc.function.arguments,
                 provider_specific_fields=provider_specific_fields,
                 function_provider_specific_fields=function_provider_specific_fields,
             ))
