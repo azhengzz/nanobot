@@ -1,6 +1,6 @@
 ---
 name: jmeter
-description: Create, modify, execute, and validate JMeter test scripts (.jmx files) for performance testing, load testing, and API automation testing. Use when users mention: jmeter, .jmx files, performance testing, load testing, stress testing, API testing, API automation, HTTP requests, thread groups, test plans, or benchmarking. Supports querying JMeter components, built-in functions, and configuration elements. Requires jmeter binary installed.
+description: Read this skill for any JMeter script (.jmx) operations: create, modify, edit, update, delete, or execute
 metadata: {"nanobot":{"emoji":"🛠","requires":{"bins":["jmeter"]},"os":["linux","darwin","win32"]}}
 ---
 
