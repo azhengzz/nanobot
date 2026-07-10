@@ -909,8 +909,9 @@ class FeishuChannel(BaseChannel):
     def _is_bot_mentioned(self, message: Any) -> bool:
         """Check if the bot is @mentioned in the message."""
         raw_content = message.content or ""
-        if "@_all" in raw_content:
-            return True
+        # fix 避免 @所有人 时唤起机器人
+        # if "@_all" in raw_content:
+        #     return True
 
         for mention in getattr(message, "mentions", None) or []:
             if self._is_bot_mention_event(mention):
