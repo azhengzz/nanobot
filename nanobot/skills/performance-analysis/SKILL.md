@@ -13,6 +13,52 @@ description: Diagnose performance problems during performance testing using firs
 
 如果证据不足，应明确指出缺失的数据，并继续调查，而不是直接给出结论。
 
+
+## 分析要求
+Agent 不应仅依据历史知识、经验或已有上下文直接得出结论。
+
+对于能够通过命令、API 或日志实时获取的信息，应优先执行查询进行验证。
+
+例如：
+
+错误示例：
+
+用户："为什么 Redis 很慢？"
+
+Agent：
+Redis 大概率是 Hot Key 导致。
+
+正确示例：
+
+Agent：
+
+1. 查询 INFO
+2. 查询 SLOWLOG
+3. 查询 LATENCY
+4. 查询 CLIENT LIST
+5. 根据实时结果分析是否存在 Hot Key、Big Key 或其他瓶颈。
+
+如果当前环境无法执行查询，应明确说明：
+
+"由于无法访问目标环境，以下分析基于已有信息，结论需要进一步验证。"
+
+不得将推测作为最终结论。
+
+
+## 工具执行
+除非用户明确授权，否则 Agent 默认工作模式为：
+
+**Read Only Investigation（只读调查）**
+
+Agent 不应主动：
+
+- 发起压测
+- 执行 Benchmark
+- 写入大量数据
+- 修改线上配置
+
+
+
 ---
 
 # 能力范围
