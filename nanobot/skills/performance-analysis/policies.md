@@ -123,6 +123,12 @@ Client → Gateway → Application → Runtime → Middleware → Database → O
 4. **Diagnostic Data** — Thread Dump、Heap Dump、pprof、perf
 5. **Configuration** — 配置参数、资源限制
 
+Kubernetes MCP 和 Grafana MCP 属于证据入口，不改变证据优先级：
+
+- Kubernetes MCP 常用于获取 Kubernetes 运行态、事件、资源、日志和 Metrics Server 数据。
+- Grafana MCP 常用于获取 Prometheus、Loki、Dashboard Panel Query 和 Datasource 数据。
+- MCP 返回的数据必须标注来源、时间窗口和查询条件。
+
 ### 4.2 交叉验证
 
 单个数据源不足以形成结论，至少需要两个独立数据源交叉验证：

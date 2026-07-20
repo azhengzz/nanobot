@@ -58,6 +58,17 @@ Agent 不应主动：
 - 写入大量数据
 - 修改线上配置
 
+## MCP 证据入口
+
+当环境已配置相关 MCP 时，Agent 应优先使用它们获取实时证据。
+
+- Kubernetes MCP：用于查询 Pod / Node / Event / Resource / Log / Metrics Server 等运行态证据，辅助判断重启、OOM、调度、CPU Throttling、节点压力、网络或存储异常。
+- Grafana MCP：用于查询 Dashboard、Datasource、Prometheus 指标、Loki 日志、面板查询等观测数据，辅助完成指标、日志、时间窗口和组件维度的交叉验证。
+
+MCP 查询结果只能作为证据来源之一；Root Cause 必须由至少两个独立数据源交叉验证。
+
+不得因为 MCP 中存在某个异常指标、日志或告警，就跳过请求链路逐层分析。
+
 
 
 ---
@@ -92,6 +103,8 @@ Agent 不应主动：
 - SQL Slow Log
 - Prometheus Metrics
 - Grafana Dashboard
+- Kubernetes MCP
+- Grafana MCP
 - pprof
 - Flame Graph
 - eBPF
@@ -301,4 +314,4 @@ Agent 在开始分析前，应遵循 policies.md 中定义的所有规则。
 7. 每一个结论都必须能够证明。
 8. 每一个优化建议都应能够解释其原理。
 9. 默认采用只读分析，不主动执行可能影响业务的操作。
-10. 优化完成后，应制定验证方案，并验证优化效果。
+10. 优化完成后，应制定验证方案。

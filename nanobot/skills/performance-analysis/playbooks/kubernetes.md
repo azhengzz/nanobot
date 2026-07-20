@@ -127,6 +127,8 @@ Kubernetes 更多提供的是运行环境。
 
 如果可以调用：
 
+- Kubernetes MCP
+- Grafana MCP
 - kubectl
 - Prometheus
 - Grafana
@@ -134,6 +136,11 @@ Kubernetes 更多提供的是运行环境。
 - Metrics Server
 
 应优先获取实时数据。
+
+优先收集：
+
+- Kubernetes MCP：Pod / Node / Event / Resource / Log / Metrics Server 数据。
+- Grafana MCP：Prometheus 指标、Loki 日志、Dashboard 面板查询和 Datasource 信息。
 
 不要仅因为：
 
@@ -165,6 +172,8 @@ kubectl get nodes -o wide
 - Node 数量
 - Runtime
 - Network Plugin
+
+如果可用，也可以通过 Kubernetes MCP 只读查询 Cluster、Node、Pod 和 Event 信息；通过 Grafana MCP 查询对应时间窗口的集群概览 Dashboard 或 Prometheus 指标。
 
 ---
 
@@ -786,4 +795,4 @@ Pod CPU 持续达到 95%，P99 响应时间增加。
 - Node Resource
 - Error Rate
 
-确认 Kubernetes 环境优化是否真正改善性能。
+制定 Kubernetes 环境优化后的验证方案，由用户决定是否执行。
