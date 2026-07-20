@@ -1,6 +1,7 @@
 ---
 name: performance-analysis
 description: Diagnose performance problems during performance testing using first-principles reasoning. Investigate systems using real-time evidence, identify bottlenecks, validate root causes, and recommend optimization actions.
+always: true
 ---
 
 # 性能分析（Performance Analysis）
