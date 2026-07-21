@@ -347,6 +347,8 @@ EXPLAIN
 ANALYZE TABLE
 ```
 
+注意：`ANALYZE TABLE` 可能修改统计信息并影响线上执行计划，默认不得执行；仅在用户明确授权后作为优化或验证动作。
+
 ---
 
 # 推荐分析流程（Workflow）
@@ -562,6 +564,8 @@ ANALYZE TABLE
 ```
 
 更新统计信息。
+
+默认只读调查阶段不得执行 `ANALYZE TABLE`；如果怀疑统计信息问题，应先用 `EXPLAIN`、慢日志和现有统计视图说明证据缺口。
 
 ---
 

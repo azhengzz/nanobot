@@ -19,19 +19,40 @@ Agent 必须默认采用**只读分析（Read-Only Analysis）**模式。
 | 配置 | 修改应用配置、数据库参数、中间件配置、JVM 参数 |
 | Kubernetes | 修改 Deployment/StatefulSet、调整资源限制、重启 Pod、扩缩容 |
 | 服务 | 重启服务、停止服务、热加载配置 |
-| 数据库 | 执行 SQL、修改索引、清理数据、执行 ANALYZE/VACUUM |
+| 数据库 | 写入数据、DDL、修改索引、清理数据、执行 ANALYZE/VACUUM、执行会真实运行目标 SQL 的诊断 |
 | 缓存 | 清理 Redis 缓存、修改淘汰策略 |
 | 网络 | 修改防火墙规则、调整网络策略 |
 | 文件 | 删除日志、清理磁盘空间 |
 | 权限 | 修改 RBAC、Secret、ConfigMap |
 
-### 1.2 授权确认
+### 1.2 允许的只读诊断
+
+以下操作默认允许，但必须控制时间窗口、返回行数和查询范围：
+
+| 类别 | 允许操作 |
+|------|----------|
+| Kubernetes | `get`、`describe`、`top`、`logs`、只读事件查询、容器内只读诊断命令 |
+| Grafana / Prometheus / Loki | 指标、日志、Dashboard、Datasource 的只读查询 |
+| Linux | `top`、`vmstat`、`iostat`、`pidstat`、`ss`、`sar`、`netstat`、`df` 等只读命令 |
+| MySQL | `SHOW`、`SELECT VERSION()`、查询系统视图、`EXPLAIN` |
+| PostgreSQL | 查询 `pg_stat_*`、`pg_locks`、`pg_settings`、普通 `EXPLAIN` |
+| Redis | `INFO`、`SLOWLOG GET`、`LATENCY`、`CLIENT LIST`、`COMMANDSTATS` |
+
+以下诊断虽然常见，但可能产生额外负载，除非用户明确授权，否则不得执行：
+
+- `kubectl exec` 执行交互式 shell、写入/删除文件、修改配置、重启进程、发起压测或持续运行的探测。
+- MySQL `ANALYZE TABLE`。
+- PostgreSQL `EXPLAIN ANALYZE`、`VACUUM`、`ANALYZE`。
+- Redis 全量 `KEYS`、大范围 `SCAN`、`--bigkeys`、`--hotkeys`。
+- `perf`、eBPF、tcpdump、heap dump、thread dump 等可能增加负载或暴露敏感信息的诊断。
+
+### 1.3 授权确认
 
 - 用户说"分析一下" → 只读分析
 - 用户说"优化一下" → 输出优化建议，等待用户确认后再执行
 - 用户说"执行优化方案" → 可以执行，但必须先输出将要执行的操作列表
 
-### 1.3 风险评估
+### 1.4 风险评估
 
 每次输出分析结论时，必须附带风险评估：
 
@@ -137,6 +158,18 @@ Kubernetes MCP 和 Grafana MCP 属于证据入口，不改变证据优先级：
 - CPU 高 + perf 确认热点函数 → 有效证据
 - 仅 CPU 高，无其他证据 → 需要补充
 
+### 4.3 根因状态
+
+Root Cause 必须标注状态：
+
+| 状态 | 标准 |
+|------|------|
+| 已确认 | 至少两个独立数据源支持同一因果链，并能解释症状 |
+| 高置信待验证 | 关键证据强相关，但仍缺少一个验证点 |
+| 证据不足 | 无法建立因果链，只能列出待收集数据 |
+
+不得把"高置信待验证"写成"已确认"。
+
 ---
 
 ## 五、输出规范（Output Standards）
@@ -146,17 +179,18 @@ Kubernetes MCP 和 Grafana MCP 属于证据入口，不改变证据优先级：
 每次分析输出必须包含：
 
 1. **问题现象（Symptoms）**
-2. **已收集证据（Evidence）**
-3. **分析过程（Reasoning）** — 含排除项及原因
-4. **根因（Root Cause）** — 含完整因果链
-5. **第一性原理解释** — 为什么该问题必然导致性能下降
-6. **优化建议（Recommendations）** — 按优先级排序，说明原因
-7. **风险评估（Risk Assessment）**
-8. **验证方案（Validation Plan）** — 默认只提供方案
+2. **时间窗口（Timeline）**
+3. **证据台账（Evidence Ledger）** — 数据源、查询条件、时间窗口、关键观察、支持/排除、置信度
+4. **分析过程（Reasoning）** — 含排除项及原因
+5. **根因状态（Root Cause Status）** — 已确认 / 高置信待验证 / 证据不足
+6. **第一性原理解释** — 为什么该问题会导致性能下降
+7. **优化建议（Recommendations）** — 按优先级排序，说明原因
+8. **风险评估（Risk Assessment）**
+9. **验证方案（Validation Plan）** — 默认只提供方案
 
 ### 5.2 禁止的输出
 
-- "可能"、"大概"、"估计" — 没有证据就不要说
+- 无证据的"可能"、"大概"、"估计" — 不确定性必须落入"高置信待验证"或"证据不足"
 - "建议扩容" — 除非已排除所有其他可能性
 - "应该是 XX 问题" — 要么确定，要么说明证据不足
 - "经验上……" — 这是性能分析，不是经验分享

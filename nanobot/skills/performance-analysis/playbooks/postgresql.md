@@ -204,7 +204,7 @@ LIMIT 20;
 执行：
 
 ```sql
-EXPLAIN ANALYZE
+EXPLAIN
 SELECT ...
 ```
 
@@ -321,7 +321,7 @@ FROM pg_locks;
 查看执行计划：
 
 ```sql
-EXPLAIN ANALYZE
+EXPLAIN
 ```
 
 查看统计：
@@ -372,7 +372,7 @@ FROM pg_stat_progress_vacuum;
 
 不要跳过：
 
-EXPLAIN ANALYZE。
+EXPLAIN。
 
 ---
 
@@ -383,7 +383,7 @@ EXPLAIN ANALYZE。
 检查：
 
 ```sql
-EXPLAIN ANALYZE
+EXPLAIN
 ```
 
 出现：
@@ -548,7 +548,7 @@ Replay Lag。
 只有满足以下条件，才能确认 PostgreSQL 是 Root Cause：
 
 - SQL 耗时占请求主要部分。
-- EXPLAIN ANALYZE 证明执行计划存在问题。
+- EXPLAIN 证明执行计划存在问题；`EXPLAIN ANALYZE` 会实际执行 SQL，默认不得在只读调查中执行。
 - Lock Wait 导致请求阻塞。
 - Shared Buffer Miss 导致大量磁盘访问。
 - WAL 或 Checkpoint 成为瓶颈。
@@ -636,7 +636,7 @@ PostgreSQL
 
 - pg_stat_activity
 - pg_stat_statements
-- EXPLAIN ANALYZE
+- EXPLAIN
 - pg_locks
 - Shared Buffer
 - WAL

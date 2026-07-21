@@ -310,7 +310,7 @@ Endpoint 是否完整。
 
 ## Network
 
-建议：
+默认优先通过 Service / Endpoint / Metrics / 日志判断网络问题。必要时可以进入容器执行短时、只读诊断命令：
 
 ```bash
 kubectl exec
@@ -373,7 +373,7 @@ kubectl logs <pod>
 kubectl logs <pod> --previous
 ```
 
-进入容器：
+可以进入容器执行只读查询；应优先使用非交互命令并控制超时时间。交互式 shell、写入文件、修改配置、重启进程或持续探测需要用户明确授权：
 
 ```bash
 kubectl exec -it <pod> -- sh

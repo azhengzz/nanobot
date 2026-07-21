@@ -1,6 +1,6 @@
 ---
 name: performance-analysis
-description: Diagnose performance problems during performance testing using first-principles reasoning. Investigate systems using real-time evidence, identify bottlenecks, validate root causes, and recommend optimization actions.
+description: Diagnose performance problems during performance testing using first-principles reasoning. Use when investigating latency, throughput, error-rate, resource saturation, Kubernetes, application, runtime, database, cache, MQ, storage, network, or Linux bottlenecks; collect real-time evidence, validate root causes, and produce evidence-backed performance analysis reports.
 always: true
 ---
 
@@ -68,6 +68,14 @@ Agent 不应主动：
 MCP 查询结果只能作为证据来源之一；Root Cause 必须由至少两个独立数据源交叉验证。
 
 不得因为 MCP 中存在某个异常指标、日志或告警，就跳过请求链路逐层分析。
+
+每次使用 MCP 时，应将以下信息写入最终分析报告的证据台账，便于复核证据来源和推理链：
+
+- 数据源名称（例如 Prometheus、Loki、Metrics Server、Kubernetes API）
+- 查询条件（namespace、workload、pod、label、PromQL、LogQL 等）
+- 时间窗口和时区
+- 返回的关键观察值
+- 该观察值支持或排除了哪一个假设
 
 
 
@@ -242,6 +250,8 @@ Agent 应根据当前问题涉及的组件，参考对应 Playbook。
 
 如果涉及多个组件，应按照请求链路逐层分析，而不是只分析单个组件。
 
+如果某个 Playbook 缺失或为空，不得假装已参考；应回到 policies.md 的通用调查流程，并明确指出需要补齐该组件 Playbook。
+
 ---
 
 # 案例参考
@@ -267,12 +277,25 @@ Agent 应根据当前问题涉及的组件，参考对应 Playbook。
 每次分析应至少包含以下内容：
 
 1. 问题现象（Symptoms）
-2. 已收集证据（Evidence）
-3. 分析过程（Reasoning）
-4. 根因（Root Cause）
-5. 第一性原理解释
-6. 优化建议（Recommendations）
-7. 验证方案（Validation Plan）
+2. 时间窗口（Timeline）
+3. 证据台账（Evidence Ledger）
+4. 逐层分析（Layer Analysis）
+5. 根因状态（Root Cause Status）
+6. 第一性原理解释
+7. 优化建议（Recommendations）
+8. 风险评估（Risk Assessment）
+9. 验证方案（Validation Plan）
+
+证据台账应使用结构化条目：
+
+| 数据源 | 查询条件 | 时间窗口 | 关键观察 | 支持/排除 | 置信度 |
+|-------|----------|----------|----------|-----------|--------|
+
+根因状态只能使用以下三类：
+
+- 已确认：至少两个独立数据源支持同一因果链。
+- 高置信待验证：证据强相关，但仍缺少一个关键验证点。
+- 证据不足：无法确认 Root Cause，必须列出缺失数据和收集方法。
 
 如果证据不足，应明确说明：
 
