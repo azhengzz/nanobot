@@ -1468,6 +1468,16 @@ class OpenAICompatProvider(LLMProvider):
                 messages, tools, model, max_tokens, temperature,
                 reasoning_effort, tool_choice,
             )
+            logger.info(
+                "LLM API request: model={}, temperature={}, max_tokens={}, "
+                "reasoning_effort={}, tool_choice={}, num_messages={}, num_tools={}, "
+                "extra_body={}",
+                kwargs.get("model"), kwargs.get("temperature"),
+                kwargs.get("max_tokens") or kwargs.get("max_completion_tokens"),
+                kwargs.get("reasoning_effort"), kwargs.get("tool_choice"),
+                len(kwargs.get("messages", [])), len(kwargs.get("tools", []) or []),
+                kwargs.get("extra_body"),
+            )
             return self._parse(await self._client.chat.completions.create(**kwargs))
         except Exception as e:
             return self._handle_error(e, spec=self._spec, api_base=self.api_base)
@@ -1551,6 +1561,16 @@ class OpenAICompatProvider(LLMProvider):
                 kwargs.setdefault("extra_body", {})["tool_stream"] = True
             kwargs["stream"] = True
             kwargs["stream_options"] = {"include_usage": True}
+            logger.info(
+                "LLM API stream request: model={}, temperature={}, max_tokens={}, "
+                "reasoning_effort={}, tool_choice={}, num_messages={}, num_tools={}, "
+                "extra_body={}",
+                kwargs.get("model"), kwargs.get("temperature"),
+                kwargs.get("max_tokens") or kwargs.get("max_completion_tokens"),
+                kwargs.get("reasoning_effort"), kwargs.get("tool_choice"),
+                len(kwargs.get("messages", [])), len(kwargs.get("tools", []) or []),
+                kwargs.get("extra_body"),
+            )
             stream = await self._client.chat.completions.create(**kwargs)
             chunks: list[Any] = []
             stream_iter = stream.__aiter__()
