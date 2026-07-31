@@ -16,6 +16,7 @@ from loguru import logger
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.providers.openai_compat_provider import _langfuse_session_id
 from nanobot.utils.file_edit_events import (
     StreamingFileEditTracker,
     build_file_edit_end_event,
@@ -353,6 +354,11 @@ class AgentRunner:
         hook: AgentHook,
         messages: list[dict[str, Any]],
     ) -> AgentRunResult:
+        # Propagate session key to OpenAI-compatible providers so Langfuse
+        # groups all LLM traces under the same session.
+        if spec.session_key:
+            _langfuse_session_id.set(spec.session_key)
+
         final_content: str | None = None
         tools_used: list[str] = []
         usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0}

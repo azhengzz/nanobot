@@ -17,8 +17,17 @@ from ipaddress import ip_address
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
+from contextvars import ContextVar
+
 from loguru import logger
 from pydantic.alias_generators import to_snake
+
+# Per-request Langfuse session ID injected via contextvars by AgentRunner.
+# When set, _build_kwargs() adds it to the OpenAI "metadata" field so
+# langfuse.openai.AsyncOpenAI groups all traces under the same session.
+_langfuse_session_id: ContextVar[str | None] = ContextVar(
+    "langfuse_session_id", default=None
+)
 
 from nanobot.providers.base import (
     LLMProvider,
@@ -805,6 +814,15 @@ class OpenAICompatProvider(LLMProvider):
         if self._extra_body:
             existing = kwargs.get("extra_body", {})
             kwargs["extra_body"] = _deep_merge(existing, self._extra_body)
+
+        # Per-request Langfuse session ID (injected via contextvars by AgentRunner).
+        session_id = _langfuse_session_id.get()
+        if session_id:
+            existing = kwargs.get("metadata")
+            if isinstance(existing, dict):
+                kwargs["metadata"] = {"langfuse_session_id": session_id, **existing}
+            else:
+                kwargs["metadata"] = {"langfuse_session_id": session_id}
 
         return kwargs
 
