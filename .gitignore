@@ -103,3 +103,6 @@ bridge/node_modules/
 
 .claude/
 nanobot/agent/tools/ssh/env.json
+nanobot/agent/tools/k8s/kube_config
+docs/
+workspace/
