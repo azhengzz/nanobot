@@ -18,7 +18,12 @@ from nanobot.agent.context_governance import (
 )
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
-from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.providers.base import (
+    LLMProvider,
+    LLMResponse,
+    ToolCallRequest,
+    _langfuse_session_id,
+)
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.utils.helpers import (
     IncrementalThinkExtractor,

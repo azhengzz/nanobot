@@ -7,6 +7,7 @@ import re
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -21,6 +22,15 @@ STREAM_IDLE_TIMEOUT_ENV = "NANOBOT_STREAM_IDLE_TIMEOUT_S"
 DEFAULT_STREAM_IDLE_TIMEOUT_S = 90.0
 MAX_STREAM_IDLE_TIMEOUT_S = 3600.0
 RETRY_AFTER_BUFFER = 1
+
+# Per-request Langfuse session ID injected via contextvars by AgentRunner.
+# When set, OpenAI-compatible providers add it to the OpenAI "metadata" field so
+# langfuse.openai.AsyncOpenAI groups all traces under the same session. Lives in
+# base.py (rather than openai_compat_provider) so AgentRunner can import it
+# without pulling the OpenAI SDK into its import chain.
+_langfuse_session_id: ContextVar[str | None] = ContextVar(
+    "langfuse_session_id", default=None
+)
 
 
 def resolve_stream_idle_timeout_s(
