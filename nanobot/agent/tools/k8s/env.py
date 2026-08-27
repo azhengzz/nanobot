@@ -17,5 +17,9 @@ KubeConfigPath = [
         'absolute_path': f'{KUBE_CONFIG_DIR / '192.168.48.92'}',
         'alias': ['192.168.48.92', '高可用测试环境', 'GiteeOPS测试环境']
     },
+    {
+        'absolute_path': f'{KUBE_CONFIG_DIR / '192.168.48.96'}',
+        'alias': ['192.168.48.96', 'aiops测试环境', 'diffchart测试环境']
+    },
 
 ]
