@@ -11,7 +11,6 @@ import asyncssh
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.schema import IntegerSchema, StringSchema, tool_parameters_schema
 
-
 __all__ = ("SSHCommand", "GetSSHAccessInfo")
 
 SSH_CONNECTIONS: dict[str, Any] = {}
@@ -82,7 +81,7 @@ def _guard_command(command: str, allow_patterns: list[str] | None = None) -> str
         port=StringSchema("SSH port of the remote server"),
         username=StringSchema("SSH login username"),
         password=StringSchema("SSH login password"),
-        timeout=IntegerSchema(60, description="Command timeout in seconds", minimum=1),
+        timeout=IntegerSchema(description="Command timeout in seconds", minimum=1),
         required=["command", "ip", "port", "username", "password"],
     )
 )

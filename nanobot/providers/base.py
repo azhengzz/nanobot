@@ -8,10 +8,9 @@ import os
 import re
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable
-from contextlib import suppress
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager, suppress
 from copy import deepcopy
-from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -37,14 +36,33 @@ ProviderCompactionScope = Literal["prior_context", "current_request"]
 RetryStatusCallback = Callable[[RetryStatusEvent], Awaitable[None]]
 
 
-# Per-request Langfuse session ID injected via contextvars by AgentRunner.
-# When set, OpenAI-compatible providers add it to the OpenAI "metadata" field so
-# langfuse.openai.AsyncOpenAI groups all traces under the same session. Lives in
-# base.py (rather than openai_compat_provider) so AgentRunner can import it
-# without pulling the OpenAI SDK into its import chain.
-_langfuse_session_id: ContextVar[str | None] = ContextVar(
-    "langfuse_session_id", default=None
-)
+# Session key for Langfuse trace grouping, applied by AgentRunner around each run.
+# Langfuse v3 groups traces by the OpenTelemetry ``session.id`` attribute on the
+# trace root span, which is set via ``langfuse.propagate_attributes``. The legacy
+# v2 ``metadata={"langfuse_session_id": ...}`` key that OpenAI-compatible
+# providers used to send is only read by the LangChain callback handler, so the
+# OpenAI SDK wrapper leaves it as plain observation metadata and the Sessions
+# view never sees it. Lives in base.py so AgentRunner can import it without
+# pulling the OpenAI SDK into its import chain.
+@contextmanager
+def langfuse_session_scope(session_key: str | None) -> Iterator[None]:
+    """Group all Langfuse traces created within the block under *session_key*.
+
+    Sets the OpenTelemetry ``session.id`` attribute that Langfuse v3 uses for
+    its Sessions view. A no-op when the key is empty, when ``langfuse`` is not
+    installed, or when tracing is not configured.
+    """
+    if not session_key:
+        yield
+        return
+    try:
+        from langfuse import propagate_attributes
+    except Exception:
+        yield
+        return
+    with propagate_attributes(session_id=session_key):
+        yield
+
 
 def resolve_stream_idle_timeout_s(
     *,

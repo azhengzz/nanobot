@@ -30,7 +30,6 @@ from nanobot.providers.base import (
     ProviderCallContext,
     ProviderConversationState,
     ToolCallRequest,
-    _langfuse_session_id,
     parse_tool_arguments,
     resolve_stream_idle_timeout_s,
     tool_arguments_json_for_replay,
@@ -1102,15 +1101,6 @@ class OpenAICompatProvider(LLMProvider):
         if extra_headers:
             kwargs["extra_headers"] = extra_headers
 
-        # Per-request Langfuse session ID (injected via contextvars by AgentRunner).
-        session_id = _langfuse_session_id.get()
-        if session_id:
-            existing = kwargs.get("metadata")
-            if isinstance(existing, dict):
-                kwargs["metadata"] = {"langfuse_session_id": session_id, **existing}
-            else:
-                kwargs["metadata"] = {"langfuse_session_id": session_id}
-
         return kwargs
 
     def _should_use_responses_api(
@@ -2144,7 +2134,10 @@ class OpenAICompatProvider(LLMProvider):
             kwargs["stream"] = True
             kwargs["timeout"] = idle_timeout_s
             kwargs["stream_options"] = {"include_usage": True}
-            stream = await self._client.chat.completions.create(**kwargs)
+            chat_stream = cast(
+                Any,
+                await client.chat.completions.create(**kwargs),
+            )
             chunks: list[Any] = []
             completed = False
             stream_iter: AsyncIterator[Any] = chat_stream.__aiter__()

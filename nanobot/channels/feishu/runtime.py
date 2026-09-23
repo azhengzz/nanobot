@@ -2697,7 +2697,7 @@ class FeishuChannel(BaseChannel):
 
             # zz 如果 not allowed 无需 reaction
             if not self.is_allowed(sender_id=sender_id):
-                logger.warning(
+                self.logger.warning(
                     "Access denied for sender {} on channel {}. "
                     "Add them to allowFrom list in config to grant access.",
                     sender_id, self.name,

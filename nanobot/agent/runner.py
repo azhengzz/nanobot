@@ -38,8 +38,7 @@ from nanobot.providers.base import (
     LLMResponse,
     LLMUsage,
     ProviderConversationState,
-    _langfuse_session_id,
-
+    langfuse_session_scope,
 )
 from nanobot.providers.conversation_state import ProviderConversationStateController
 from nanobot.session.summary import SessionSummaryCheckpoint
@@ -317,7 +316,9 @@ class AgentRunner:
 
         try:
             await hook.before_run(context)
-            result = await self._run_core(spec, hook, messages, compaction)
+            # Group every LLM trace from this run under one Langfuse session.
+            with langfuse_session_scope(spec.session_key):
+                result = await self._run_core(spec, hook, messages, compaction)
         except asyncio.CancelledError as exc:
             context.messages = deepcopy(messages)
             context.stop_reason = "cancelled"
@@ -392,11 +393,6 @@ class AgentRunner:
         messages: list[dict[str, Any]],
         compaction: ContextCompactionState | None,
     ) -> AgentRunResult:
-        # Propagate session key to OpenAI-compatible providers so Langfuse
-        # groups all LLM traces under the same session.
-        if spec.session_key:
-            _langfuse_session_id.set(spec.session_key)
-
         final_content: str | None = None
         tools_used: list[str] = []
         usage: LLMUsage | None = None
