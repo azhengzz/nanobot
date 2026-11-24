@@ -1,9 +1,8 @@
 import type { ChannelUiContribution } from "@/channel-plugins/types";
-import { chatAppGuideUrl } from "@/components/settings/channels/catalog";
+import { chatAppGuideUrl } from "@/channel-plugins/catalog";
 
 export default {
   presentation: {
-    logoUrl: "https://img.alicdn.com/imgextra/i3/O1CN01WMvMRG1ks3Ixc9x1v_!!6000000004738-55-tps-32-32.svg",
     displayName: "DingTalk",
     initials: "DT",
     color: "#1677FF",

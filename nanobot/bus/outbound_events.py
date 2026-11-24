@@ -57,6 +57,13 @@ class StreamedResponseEvent(AgentEvent):
 
 
 @dataclass(frozen=True)
+class SideChannelReplyEvent(AgentEvent):
+    """Command text that does not replace the active assistant answer."""
+
+    notification_id: str | None = None
+
+
+@dataclass(frozen=True)
 class TurnEndEvent(AgentEvent):
     latency_ms: int | None = None
     goal_state: dict[str, Any] | None = None
@@ -92,6 +99,7 @@ class UserInputEvent(AgentEvent):
 
     content: str
     created_at_ms: int
+    input_id: str
     provenance: dict[str, Any]
 
 
@@ -109,6 +117,7 @@ class TurnModelUpdatedEvent(AgentEvent):
     model_preset: str | None = None
     context_window_tokens: int | None = None
     fallback: bool = False
+    reauth_provider: str | None = None
 
 
 def outbound_message_for_event(

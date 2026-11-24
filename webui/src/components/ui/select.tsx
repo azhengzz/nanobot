@@ -4,31 +4,35 @@ import { Check, ChevronDown, ChevronUp } from "lucide-react";
 
 import { floatingSurfaceElevationClassName, floatingItemClassName } from "@/components/ui/floating-surface";
 import { useFloatingPortal } from "@/components/ui/floating-portal";
+import { useOverlaySurfaceRef } from "@/lib/dom-overlays";
 import { cn } from "@/lib/utils";
+import { ControlChevron } from "@/components/ui/control-chevron";
 
 export const Select = SelectPrimitive.Root;
 export const SelectValue = SelectPrimitive.Value;
+export const SelectSeparator = SelectPrimitive.Separator;
 
 export const SelectTrigger = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Trigger>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger>
 >(({ className, children, ...props }, ref) => (
   <SelectPrimitive.Trigger ref={ref} {...props}
-    className={cn("flex h-9 items-center justify-between gap-2 rounded-control border border-input bg-background px-3 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 [&>span:first-child]:truncate", className)}>
+    className={cn("control-layout justify-between rounded-control border-input bg-background text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 [&>span:first-child]:truncate", className)}>
     {children}
-    <SelectPrimitive.Icon asChild><ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden /></SelectPrimitive.Icon>
+    <SelectPrimitive.Icon><ControlChevron /></SelectPrimitive.Icon>
   </SelectPrimitive.Trigger>
 ));
 SelectTrigger.displayName = "SelectTrigger";
 
 export function SelectContent({ children, ...props }: Pick<
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content>,
-  "children" | "onPointerUpCapture" | "onPointerDownOutside" | "onKeyDownCapture" | "onEscapeKeyDown"
+  "children" | "onPointerUpCapture" | "onPointerDownOutside" | "onKeyDownCapture" | "onEscapeKeyDown" | "onCloseAutoFocus"
 >) {
   const container = useFloatingPortal();
+  const surfaceRef = useOverlaySurfaceRef<HTMLDivElement>("overlay");
   return (
     <SelectPrimitive.Portal container={container ?? undefined}>
-      <SelectPrimitive.Content {...props} position="item-aligned" className={cn("z-50 max-h-[min(24rem,calc(100dvh-2rem))] min-w-[10rem] overflow-hidden rounded-control border border-transparent", floatingSurfaceElevationClassName)}>
+      <SelectPrimitive.Content ref={surfaceRef} {...props} position="item-aligned" className={cn("z-50 max-h-[min(24rem,calc(100dvh-2rem))] min-w-[10rem] overflow-hidden rounded-control border border-transparent", floatingSurfaceElevationClassName)}>
         <SelectPrimitive.ScrollUpButton className="flex h-6 items-center justify-center"><ChevronUp className="h-3.5 w-3.5" /></SelectPrimitive.ScrollUpButton>
         <SelectPrimitive.Viewport className="p-1">
           {children}

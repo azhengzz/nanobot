@@ -1,3 +1,8 @@
+import { ModelOptionsControl, type ModelOptionsControlProps } from "@/components/thread/ModelOptionsControl";
+import { formatModelContextWindow } from "@/lib/model-context-format";
+import {
+  ModelsIcon,
+} from "@/components/icons/product-icons";
 import {
   useEffect,
   useLayoutEffect,
@@ -6,7 +11,7 @@ import {
   type KeyboardEvent,
   type PointerEvent,
 } from "react";
-import { Check, SlidersHorizontal, Sparkles } from "lucide-react";
+import { Check } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -16,10 +21,12 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
+import { useOverlayEscapeFocus } from "@/hooks/useOverlayEscapeFocus";
 import { inferProviderFromModelName, providerBrand } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
 
 const pickerWidthClassName = "w-[min(18rem,calc(100vw-2rem))]";
+const speedPickerWidthClassName = "w-max max-w-[min(22rem,calc(100vw-1rem))]";
 const LONG_PRESS_MS = 400;
 const PRESS_SLOP_PX = 8;
 const PILL_GAP_PX = 4;
@@ -76,6 +83,8 @@ function compactModelName(model?: string | null): string | null {
 
 export interface ModelPresetOption {
   name: string;
+  contextWindowTokens?: number;
+  reasoningEffort?: string | null;
   model?: string | null;
   provider?: string | null;
 }
@@ -86,13 +95,14 @@ interface ModelPresetBadgeProps {
   modelPreset?: string | null;
   modelPresets?: ModelPresetOption[];
   onPresetChange?: (name: string) => void;
+  modelOptionsControl?: ModelOptionsControlProps;
+  onMenuOpenChange?: (open: boolean) => void;
   onManageModels?: () => void;
   onRequestComposerFocus?: () => void;
   provider?: string | null;
   providerLabel?: string | null;
   needsSetup?: boolean;
   attentionRequest?: number;
-  fallbackModelName?: string | null;
   isHero: boolean;
   onClick?: () => void;
 }
@@ -103,23 +113,28 @@ export function ModelPresetBadge({
   modelPreset,
   modelPresets = [],
   onPresetChange,
+  modelOptionsControl,
+  onMenuOpenChange,
   onManageModels,
   onRequestComposerFocus,
   provider,
   providerLabel,
   needsSetup = false,
   attentionRequest = 0,
-  fallbackModelName,
   isHero,
   onClick,
 }: ModelPresetBadgeProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [tooltipOpen, setTooltipOpen] = useState(false);
+  useEffect(() => { onMenuOpenChange?.(open); }, [onMenuOpenChange, open]);
   const [motion, setMotion] = useState<PresetMotion | null>(null);
   const [motionWidth, setMotionWidth] = useState<number | null>(null);
   const gestureRef = useRef<PresetGesture | null>(null);
   const suppressClickRef = useRef(false);
+  const escapeFocus = useOverlayEscapeFocus();
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const focusAfterClose = useRef<"composer" | "management" | null>(null);
   const activeName = modelPreset?.trim() || "";
   const listedIndex = modelPresets.findIndex((preset) => preset.name === activeName);
   const activePreset: ModelPresetOption = {
@@ -128,23 +143,15 @@ export function ModelPresetBadge({
     model: modelDetail ?? modelPresets[listedIndex]?.model,
     provider: provider || modelPresets[listedIndex]?.provider,
   };
-  const fallbackPreset = fallbackModelName
-    ? modelPresets.find((preset) => preset.model?.trim() === fallbackModelName.trim())
-    : undefined;
-  const fallbackDisplayLabel = fallbackPreset?.name
-    || fallbackModelName?.trim().split(/[/:]/).pop()
-    || null;
-  const displayLabel = fallbackDisplayLabel || label;
-  const displayModelDetail = fallbackPreset
-    ? fallbackPreset.model
-    : fallbackModelName || modelDetail;
-  const displayProvider = fallbackPreset?.provider
-    || (fallbackModelName ? inferProviderFromModelName(fallbackModelName) : provider);
-  const tooltipLabel = [...new Set([
-    displayLabel,
-    displayModelDetail,
-    fallbackModelName ? null : providerLabel,
-  ].filter(Boolean))].join(" · ");
+  const tooltipParts = needsSetup ? [label] : [...new Set([
+    label,
+    modelDetail,
+    providerLabel,
+    [
+      activePreset.contextWindowTokens ? formatModelContextWindow(activePreset.contextWindowTokens) : null,
+      activePreset.reasoningEffort,
+    ].filter(Boolean).join("  "),
+  ].filter((part): part is string => Boolean(part)))];
   const presets = !activeName
     ? modelPresets
     : listedIndex < 0
@@ -152,6 +159,9 @@ export function ModelPresetBadge({
       : modelPresets.map((preset, index) => index === listedIndex ? activePreset : preset);
   const opensSetup = Boolean(onClick);
   const canSwitch = !opensSetup && Boolean(onPresetChange) && activeName !== "" && presets.length > 1;
+  const canOpenPicker = !opensSetup && (canSwitch || Boolean(onManageModels) || Boolean(modelOptionsControl?.data));
+  const showsSpeedControl = Boolean(modelOptionsControl?.data?.capability.codex_fast_mode);
+  const pickerPresets = activeName && onPresetChange ? presets : [activePreset];
   const currentIndex = Math.max(0, presets.findIndex((preset) => preset.name === activeName));
   const pillHeight = isHero ? 32 : 36;
   const pillStride = pillHeight + PILL_GAP_PX;
@@ -160,12 +170,14 @@ export function ModelPresetBadge({
   });
 
   const selectPreset = (name: string) => {
+    if (open) focusAfterClose.current = "composer";
+    else requestAnimationFrame(() => onRequestComposerFocus?.());
     setOpen(false);
     if (name !== activeName) onPresetChange?.(name);
-    requestAnimationFrame(() => onRequestComposerFocus?.());
   };
 
   const openModelSettings = () => {
+    focusAfterClose.current = "management";
     setOpen(false);
     onManageModels?.();
   };
@@ -264,6 +276,7 @@ export function ModelPresetBadge({
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (!canSwitch) return;
     const targetByKey: Record<string, number> = {
       ArrowUp: currentIndex - 1,
       ArrowDown: currentIndex + 1,
@@ -280,27 +293,26 @@ export function ModelPresetBadge({
   const pill = (
     <PresetPill
       key={needsSetup ? attentionRequest : undefined}
-      label={displayLabel}
-      modelDetail={displayModelDetail}
-      provider={displayProvider}
+      label={label}
+      modelDetail={modelDetail}
+      provider={provider}
       needsSetup={needsSetup}
       needsAttention={needsSetup && attentionRequest > 0}
-      fallbackModelName={fallbackModelName}
       isHero={isHero}
     />
   );
 
   const Container = opensSetup ? "button" : "span";
-  const badge = !canSwitch ? (
+  const badge = !canOpenPicker ? (
     <TooltipTrigger asChild>
       <Container
-        aria-label={displayLabel}
+        aria-label={label}
         tabIndex={opensSetup ? undefined : 0}
         type={opensSetup ? "button" : undefined}
         onClick={opensSetup ? onClick : undefined}
         className={cn(
-          "thread-composer-model-badge group inline-flex w-fit min-w-0 max-w-[min(18rem,44vw)] appearance-none border-0 bg-transparent p-0 shadow-none",
-          opensSetup && "cursor-pointer focus-visible:outline-none",
+          "thread-composer-model-badge group inline-flex w-fit min-w-0 max-w-[min(18rem,44vw)] appearance-none border-0 bg-transparent p-0 shadow-none focus-visible:outline-none",
+          opensSetup && "cursor-pointer",
           isHero ? "h-8" : "h-9",
         )}
       >
@@ -308,20 +320,18 @@ export function ModelPresetBadge({
       </Container>
     </TooltipTrigger>
   ) : (
-    <Popover
-      open={open}
-      onOpenChange={(nextOpen) => {
-        setOpen(nextOpen);
-        if (!nextOpen) requestAnimationFrame(() => onRequestComposerFocus?.());
-      }}
-    >
+    <Popover open={open} onOpenChange={(next) => {
+      if (next) focusAfterClose.current = null;
+      setOpen(next);
+    }}>
       <PopoverTrigger asChild>
         <TooltipTrigger asChild>
           <button
             type="button"
             data-switching={motion ? "true" : undefined}
-            aria-label={displayLabel}
+            aria-label={label}
             aria-expanded={open}
+            {...escapeFocus.triggerProps}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerLeave={(event) => {
@@ -349,7 +359,7 @@ export function ModelPresetBadge({
             className={cn(
               "thread-composer-model-badge group relative inline-flex w-fit min-w-0 max-w-[min(18rem,44vw)] cursor-pointer appearance-none border-0 bg-transparent p-0 shadow-none focus-visible:outline-none",
               motion && "z-10 cursor-grabbing",
-              !motion && "cursor-grab",
+              canSwitch && !motion && "cursor-grab",
               isHero ? "h-8" : "h-9",
             )}
           >
@@ -400,11 +410,28 @@ export function ModelPresetBadge({
         </TooltipTrigger>
       </PopoverTrigger>
       <PopoverContent
+        ref={pickerRef}
         align="end"
         side="top"
         sideOffset={10}
+        collisionPadding={showsSpeedControl ? 8 : 12}
         role="dialog"
         aria-label={switchModelLabel}
+        onEscapeKeyDown={escapeFocus.contentProps.onEscapeKeyDown}
+        onCloseAutoFocus={(event) => {
+          // The old focus scope can finish after a new picker has mounted.
+          if (pickerRef.current) {
+            event.preventDefault();
+            return;
+          }
+          if (focusAfterClose.current === "management") event.preventDefault();
+          else if (focusAfterClose.current === "composer" && onRequestComposerFocus) {
+            event.preventDefault();
+            onRequestComposerFocus();
+          }
+          escapeFocus.contentProps.onCloseAutoFocus(event);
+          focusAfterClose.current = null;
+        }}
         onOpenAutoFocus={(event) => {
           event.preventDefault();
           const content = event.currentTarget;
@@ -415,36 +442,49 @@ export function ModelPresetBadge({
           selected?.focus();
         }}
         className={cn(
-          pickerWidthClassName,
-          "origin-[var(--radix-popover-content-transform-origin)] p-1.5 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-bottom-1 data-[state=open]:slide-in-from-bottom-1 duration-200 ease-out motion-reduce:animate-none",
+          showsSpeedControl ? speedPickerWidthClassName : pickerWidthClassName,
+          "inset-scrollbar flex max-h-[var(--radix-popover-content-available-height)] flex-col overflow-y-auto",
         )}
       >
         <div
           role="listbox"
           aria-label={switchModelLabel}
-          className="max-h-[min(16rem,var(--radix-popover-content-available-height))] overflow-y-auto py-1 scrollbar-thin scrollbar-track-transparent"
+          onKeyDown={(event) => {
+            const options = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="option"]'));
+            const index = options.indexOf(document.activeElement as HTMLButtonElement);
+            const targets: Record<string, number> = {
+              ArrowUp: index - 1, ArrowDown: index + 1, Home: 0, End: options.length - 1,
+            };
+            const target = targets[event.key];
+            if (target === undefined || options.length === 0) return;
+            event.preventDefault();
+            options[wrapIndex(target, options.length)].focus();
+          }}
+          className="inset-scrollbar min-h-11 max-h-64 overflow-y-auto py-1 [scrollbar-gutter:stable]"
         >
-          {presets.map((preset) => (
+          {pickerPresets.map((preset) => (
             <PresetOption
               key={preset.name}
               preset={preset}
+              label={preset.name || label}
               selected={preset.name === activeName}
               onSelect={selectPreset}
             />
           ))}
         </div>
+        {modelOptionsControl ? <ModelOptionsControl {...modelOptionsControl} /> : null}
         {onManageModels ? (
-          <div className="mt-1 border-t border-border/55 pt-1">
+          <div className="mt-1 shrink-0 border-t border-border/55 pt-1">
             <button
               type="button"
               onClick={openModelSettings}
               className={cn(
                 floatingItemClassName,
                 floatingItemFocusClassName,
-                "flex min-h-9 w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground",
+                "flex min-h-9 w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground max-sm:min-h-11",
               )}
             >
-              <SlidersHorizontal className="size-4 shrink-0" strokeWidth={1.75} />
+              <ModelsIcon className="size-4 shrink-0" strokeWidth={1.75} />
               <span>{t("thread.composer.manageModels")}</span>
             </button>
           </div>
@@ -455,9 +495,11 @@ export function ModelPresetBadge({
 
   return (
     <TooltipProvider>
-      <Tooltip open={tooltipOpen && !open && !motion} onOpenChange={setTooltipOpen}>
+      <Tooltip open={tooltipParts.length > 1 && tooltipOpen && !open && !motion} onOpenChange={setTooltipOpen}>
         {badge}
-        <TooltipContent side="top">{tooltipLabel}</TooltipContent>
+        <TooltipContent side="top" className="max-w-[min(24rem,calc(100vw-2rem))] space-y-1 break-words">
+          {tooltipParts.map((part, index) => <p key={part} className={index === 0 ? "font-medium" : "whitespace-pre-wrap text-xs text-muted-foreground"}>{part}{index < tooltipParts.length - 1 ? " " : ""}</p>)}
+        </TooltipContent>
       </Tooltip>
     </TooltipProvider>
   );
@@ -465,10 +507,12 @@ export function ModelPresetBadge({
 
 function PresetOption({
   preset,
+  label,
   selected,
   onSelect,
 }: {
   preset: ModelPresetOption;
+  label: string;
   selected: boolean;
   onSelect: (name: string) => void;
 }) {
@@ -477,7 +521,7 @@ function PresetOption({
     <button
       type="button"
       role="option"
-      aria-label={preset.name}
+      aria-label={label}
       aria-selected={selected}
       onClick={() => onSelect(preset.name)}
       className={cn(
@@ -488,14 +532,14 @@ function PresetOption({
       )}
     >
       <PresetProviderIcon
-        label={preset.name}
+        label={label}
         modelDetail={detail}
         provider={preset.provider}
         isHero={false}
       />
       <span className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden whitespace-nowrap max-sm:flex-col max-sm:items-start max-sm:gap-0.5 max-sm:whitespace-normal">
-        <span className="shrink-0 text-[13px] font-medium text-foreground max-sm:max-w-full max-sm:break-words">{preset.name}</span>
-        {detail && detail !== preset.name ? (
+        <span className="shrink-0 text-[13px] font-medium text-foreground max-sm:max-w-full max-sm:break-words">{label}</span>
+        {detail && detail !== label ? (
           <span className="truncate text-[12px] text-muted-foreground">{detail}</span>
         ) : null}
       </span>
@@ -510,7 +554,6 @@ function PresetPill({
   provider,
   needsSetup = false,
   needsAttention = false,
-  fallbackModelName,
   isHero,
   offset,
   scale,
@@ -520,7 +563,6 @@ function PresetPill({
   provider?: string | null;
   needsSetup?: boolean;
   needsAttention?: boolean;
-  fallbackModelName?: string | null;
   isHero: boolean;
   offset?: number;
   scale?: number;
@@ -543,7 +585,6 @@ function PresetPill({
 
   return (
     <span
-      data-fallback={fallbackModelName ? "true" : undefined}
       data-needs-setup={needsSetup ? "true" : undefined}
       data-preset-offset={offset}
       className={cn(
@@ -602,7 +643,7 @@ function SetupPromptLabel({ label }: { label: string }) {
   );
 }
 
-function PresetProviderIcon({
+export function PresetProviderIcon({
   label,
   modelDetail,
   provider,
@@ -617,16 +658,28 @@ function PresetProviderIcon({
 }) {
   const inferredProvider = provider || inferProviderFromModelName(modelDetail || label);
   const brand = providerBrand(inferredProvider);
-  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
+  const { logoUrl, logoLoaded, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
+  const isLogoTile = brand?.logoLayout === "tile" && logoUrl === brand.logoUrl;
   return (
     <span
       data-testid={testId}
       className={cn(
-        "grid shrink-0 place-items-center",
+        "grid shrink-0 place-items-center overflow-hidden rounded-[5px]",
         isHero ? "h-4 w-4" : "h-[18px] w-[18px]",
+        logoUrl && (logoLoaded ? (isLogoTile ? "bg-transparent" : "bg-white") : "bg-muted"),
       )}
       aria-hidden
     >
+      <span
+        className={cn(
+          "col-start-1 row-start-1 grid h-full w-full place-items-center rounded-[5px] text-white",
+          isHero ? "text-[7.5px]" : "text-[8px]",
+          logoLoaded ? "opacity-0" : "opacity-100",
+        )}
+        style={brand ? { backgroundColor: brand.color } : undefined}
+      >
+        {brand ? brand.initials.slice(0, 2) : <ModelsIcon className="h-3 w-3 text-muted-foreground/65" />}
+      </span>
       {logoUrl ? (
         <img
           src={logoUrl}
@@ -634,23 +687,16 @@ function PresetProviderIcon({
           draggable={false}
           decoding="async"
           loading="lazy"
-          className={cn("object-contain", isHero ? "h-3.5 w-3.5" : "h-[18px] w-[18px]")}
+          referrerPolicy="no-referrer"
+          className={cn(
+            "col-start-1 row-start-1 object-contain",
+            isLogoTile ? "h-full w-full" : "h-3.5 w-3.5",
+            logoLoaded ? "opacity-100" : "opacity-0",
+          )}
           onLoad={onLogoLoad}
           onError={onLogoError}
         />
-      ) : brand ? (
-        <span
-          className={cn(
-            "grid h-full w-full place-items-center rounded-full text-white",
-            isHero ? "text-[7.5px]" : "text-[8px]",
-          )}
-          style={{ backgroundColor: brand.color }}
-        >
-          {brand.initials.slice(0, 2)}
-        </span>
-      ) : (
-        <Sparkles className="h-3 w-3 text-muted-foreground/65" />
-      )}
+      ) : null}
     </span>
   );
 }

@@ -17,7 +17,7 @@ from nanobot.providers.base import GenerationSettings
 from nanobot.providers.factory import ProviderSnapshot, load_provider_snapshot
 from nanobot.session.model_selection import (
     SESSION_MODEL_PRESET_METADATA_KEY,
-    model_preset_from_metadata,
+    SessionModelPreset,
 )
 from nanobot.webui.settings_api import update_agent_settings
 
@@ -148,7 +148,7 @@ def test_same_snapshot_default_clears_preset_and_publishes_update(tmp_path: Path
     assert published == [("fast-model", None)]
 
 
-def test_named_default_refresh_is_used_by_sessions_without_override(tmp_path: Path) -> None:
+async def test_named_default_refresh_is_used_by_sessions_without_override(tmp_path: Path) -> None:
     provider = _provider("shared-model")
     shared_signature = ("shared-model", "auto", "same-settings")
     snapshots = {
@@ -189,8 +189,8 @@ def test_named_default_refresh_is_used_by_sessions_without_override(tmp_path: Pa
     session = loop.sessions.get_or_create("sdk:new-after-refresh")
 
     assert runtime.model_preset == "deep"
-    assert loop.runtime_for_session(session).model_preset == "deep"
-    assert model_preset_from_metadata(session.metadata) is None
+    assert (await loop.runtime_for_session(session)).model_preset == "deep"
+    assert SessionModelPreset.from_metadata(session.metadata).base_preset is None
 
 
 @pytest.mark.asyncio
@@ -231,7 +231,7 @@ async def test_config_invalidation_defers_canonical_notification_until_default_r
     catalog["fast"] = ModelPresetConfig(model="model-b")
 
     loop.invalidate_runtime_config()
-    runtime = loop.runtime_for_session(session)
+    runtime = (await loop.runtime_for_session(session))
     await asyncio.sleep(0)
 
     assert published == []

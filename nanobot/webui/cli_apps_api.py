@@ -1,17 +1,16 @@
-"""CLI Apps helpers for the WebUI HTTP and message surfaces."""
-
 from __future__ import annotations
 
 import asyncio
 import re
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
 from nanobot.apps.cli import CliAppError, CliAppManager, CliAppsRuntimeConfig
 from nanobot.config.loader import load_config
-
-QueryParams = dict[str, list[str]]
+from nanobot.webui.settings_contracts import QueryParams
+from nanobot.webui.settings_contracts import query_first as _query_first
 
 _CLI_APP_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$", re.IGNORECASE)
 _CLI_APP_ATTACHMENT_KEYS = (
@@ -85,11 +84,6 @@ def normalize_cli_app_mentions(raw: Any) -> list[dict[str, str]]:
     return out
 
 
-def _query_first(query: QueryParams, key: str) -> str | None:
-    values = query.get(key)
-    return values[0] if values else None
-
-
 def _manager(config_path: Path | None = None) -> CliAppManager:
     config = load_config(config_path) if config_path is not None else load_config()
     cli_cfg = config.tools.cli_apps
@@ -103,24 +97,38 @@ def _manager(config_path: Path | None = None) -> CliAppManager:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _LocalRead:
+    payload: dict[str, Any]
+    refresh_manager: CliAppManager | None = None
+
+
+def _read_local(*, installed_only: bool, config_path: Path | None) -> _LocalRead:
+    manager = _manager(config_path) if config_path is not None else _manager()
+    if installed_only:
+        return _LocalRead(manager.installed_payload())
+    payload = manager.payload(cache_only=True)
+    refresh_manager = None if manager.catalog_cache_fresh(include_optional=True) else manager
+    if not payload["apps"]:
+        installed = manager.installed_payload()
+        if installed["apps"]:
+            payload = installed
+    return _LocalRead(payload, refresh_manager)
+
+
 async def cli_apps_payload(
     *,
     installed_only: bool = False,
     config_path: Path | None = None,
 ) -> dict[str, Any]:
-    manager = _manager(config_path) if config_path is not None else _manager()
-    if installed_only:
-        return manager.installed_payload()
-    payload = manager.payload(cache_only=True)
-    refresh_pending = False
-    if not manager.catalog_cache_fresh(include_optional=True):
-        refresh_pending = _start_catalog_refresh(manager)
-    if not payload["apps"]:
-        installed = manager.installed_payload()
-        if installed["apps"]:
-            payload = installed
-    payload["catalog_refresh_pending"] = refresh_pending
-    return payload
+    # Configuration, cache reads and executable discovery can all block on disk.
+    local = await asyncio.to_thread(_read_local, installed_only=installed_only, config_path=config_path)
+    if not installed_only:
+        # Refresh task/throttle state belongs to this event loop, not the reader.
+        local.payload["catalog_refresh_pending"] = (
+            _start_catalog_refresh(local.refresh_manager) if local.refresh_manager is not None else False
+        )
+    return local.payload
 
 
 def cli_apps_action(

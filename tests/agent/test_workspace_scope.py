@@ -16,7 +16,7 @@ from nanobot.agent.tools.image_generation import ImageGenerationError, ImageGene
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.search import GrepTool
 from nanobot.agent.tools.shell import ExecTool
-from nanobot.agent.tools.spawn import SpawnTool
+from nanobot.agent.tools.subagent import SubagentTool
 from nanobot.apps.cli.service import CliAppManager, CliAppsRuntimeConfig
 from nanobot.config.schema import ImageGenerationToolConfig, ProviderConfig, ToolsConfig
 from nanobot.security.workspace_access import (
@@ -176,6 +176,7 @@ async def test_restricted_project_can_read_agent_skills_and_exact_history(tmp_pa
     skill_file = agent_workspace / "skills" / "custom" / "SKILL.md"
     history_file = agent_workspace / "memory" / "history.jsonl"
     private_memory_file = agent_workspace / "memory" / "private.txt"
+    wiki_file = agent_workspace / "memory" / "wiki" / "projects" / "example.md"
     private_file = agent_workspace / "private.txt"
     project_file = project / "project.txt"
     skill_file.parent.mkdir(parents=True)
@@ -183,6 +184,8 @@ async def test_restricted_project_can_read_agent_skills_and_exact_history(tmp_pa
     project.mkdir()
     skill_file.write_text("global skill", encoding="utf-8")
     history_file.write_text('{"content":"global history"}\n', encoding="utf-8")
+    wiki_file.parent.mkdir(parents=True)
+    wiki_file.write_text("Wiki deployment details", encoding="utf-8")
     private_memory_file.write_text("private memory", encoding="utf-8")
     private_file.write_text("private", encoding="utf-8")
     project_file.write_text("project", encoding="utf-8")
@@ -209,6 +212,8 @@ async def test_restricted_project_can_read_agent_skills_and_exact_history(tmp_pa
             path=str(history_file),
             output_mode="content",
         )
+        wiki_result = await read_tool.execute(path=str(wiki_file))
+        wiki_write_result = await write_tool.execute(path=str(wiki_file), content="changed")
         private_memory_result = await read_tool.execute(path=str(private_memory_file))
         private_result = await read_tool.execute(path=str(private_file))
         write_result = await write_tool.execute(path=str(skill_file), content="changed")
@@ -219,6 +224,9 @@ async def test_restricted_project_can_read_agent_skills_and_exact_history(tmp_pa
     assert "project" in project_result
     assert "global skill" in skill_result
     assert "global history" in history_result
+    assert "Wiki deployment details" in wiki_result
+    assert "outside allowed directory" in wiki_write_result
+    assert wiki_file.read_text(encoding="utf-8") == "Wiki deployment details"
     assert "outside allowed directory" in private_memory_result
     assert "outside allowed directory" in private_result
     assert "outside allowed directory" in write_result
@@ -532,7 +540,7 @@ async def test_cli_app_scope_controls_working_dir(
 
 
 @pytest.mark.asyncio
-async def test_spawn_tool_forwards_current_workspace_scope(tmp_path: Path) -> None:
+async def test_subagent_tool_forwards_current_workspace_scope(tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()
     scope = validate_workspace_scope_payload(
@@ -555,7 +563,7 @@ async def test_spawn_tool_forwards_current_workspace_scope(tmp_path: Path) -> No
             return "spawned"
 
     manager = Manager()
-    tool = SpawnTool(manager)  # type: ignore[arg-type]
+    tool = SubagentTool(manager)  # type: ignore[arg-type]
     token = bind_workspace_scope(scope)
     try:
         with request_context(RequestContext(
@@ -563,7 +571,7 @@ async def test_spawn_tool_forwards_current_workspace_scope(tmp_path: Path) -> No
             chat_id="chat",
             runtime=MagicMock(),
         )):
-            result = await tool.execute(task="inspect")
+            result = await tool.execute(action="create", task="inspect")
     finally:
         reset_workspace_scope(token)
 

@@ -1,12 +1,39 @@
-import { defineConfig, loadEnv, type Plugin } from "vite";
+import { defineConfig, loadEnv, transformWithEsbuild, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { readStartupLayout, StartupSkeleton } from "./src/components/StartupSkeleton";
+import { componentGallery } from "./src/dev/gallery/inventory-plugin";
+
+function startupSkeleton(): Plugin {
+  return {
+    name: "nanobot-startup-skeleton",
+    transformIndexHtml: {
+      order: "post",
+      handler(html) {
+        if (!html.includes("<!--startup-shell-->")) return html;
+        const css = ["src/components/content-column.css", "src/components/settings/shared/catalog-layout.css", "src/components/startup-skeleton.css"]
+          .map((file) => readFileSync(path.resolve(__dirname, file), "utf8")).join("\n");
+        const initialize = `var shell = document.querySelector('.startup-shell'); var layout = (${readStartupLayout.toString()})();
+          shell.dataset.startupSurface = layout.surface; shell.dataset.startupSection = layout.section;
+          shell.dataset.sidebarExpanded = String(layout.sidebarExpanded); shell.dataset.existingChat = String(layout.existingChat);
+          shell.dataset.calendarWeeks = String(layout.calendarWeeks);
+          shell.style.setProperty('--startup-sidebar-width', (layout.sidebarExpanded ? layout.sidebarWidth : 56) + 'px');`;
+        return html.replace("<!--startup-style-->", `<style>${css}</style>`)
+          .replace("<!--startup-shell-->", renderToStaticMarkup(createElement(StartupSkeleton)))
+          .replace("<!--startup-script-->", `<script>${initialize}</script>`)
+          .replace(/<link rel="stylesheet"/g, '<link rel="preload" as="style" data-app-stylesheet');
+      },
+    },
+  };
+}
 
 const GZIP_MIN_BYTES = 4 * 1024;
 const GZIP_ASSET_PATTERN = /\.(?:css|html|js|json|mjs|svg)$/i;
-const LAZY_FEATURE_CHUNK_PREFIXES = ["markdown-vendor-", "syntax-highlight-", "katex-"];
+const LAZY_FEATURE_CHUNK_PREFIXES = ["markdown-vendor-", "markdown-diagrams-", "MermaidBlock-", "HighlightedCode-", "code-highlighter-", "PierreFileDiff-", "katex-"];
 
 export function entryLazyFeatureImports(imports: string[]): string[] {
   return imports.filter((fileName) =>
@@ -14,19 +41,56 @@ export function entryLazyFeatureImports(imports: string[]): string[] {
   );
 }
 
-function guardWebuiEntryChunk(): Plugin {
+function guardWebuiChunkBoundaries(): Plugin {
   return {
-    name: "nanobot-guard-webui-entry-chunk",
+    name: "nanobot-guard-webui-chunk-boundaries",
     apply: "build",
     generateBundle(_options, bundle) {
       for (const output of Object.values(bundle)) {
-        if (output.type !== "chunk" || !output.isEntry) continue;
-        const unexpected = entryLazyFeatureImports(output.imports);
-        if (unexpected.length > 0) {
-          throw new Error(
-            `WebUI entry chunk statically imports lazy features: ${unexpected.join(", ")}`,
-          );
+        if (output.type !== "chunk") continue;
+        if (output.isEntry) {
+          const unexpected = entryLazyFeatureImports(output.imports);
+          if (unexpected.length > 0) {
+            this.error(`WebUI entry chunk statically imports lazy features: ${unexpected.join(", ")}`);
+          }
         }
+        if (!output.moduleIds.some((id) => /\/(?:PierreFileDiff\.tsx|code-highlighter-grammars\.ts)$/.test(id))) continue;
+        const visited = new Set<string>();
+        const pending = [output.fileName];
+        for (const fileName of pending) {
+          if (visited.has(fileName)) continue;
+          visited.add(fileName);
+          if (path.basename(fileName).startsWith("markdown-vendor-")) {
+            this.error(`${output.fileName} statically loads the Markdown parser via ${fileName}`);
+          }
+          const dependency = bundle[fileName];
+          if (dependency?.type === "chunk") pending.push(...dependency.imports);
+        }
+      }
+    },
+  };
+}
+
+const PIERRE_WORKER_MODULES = "/node_modules/@pierre/diffs/dist/worker/";
+
+function specializePierreDiffWorker(): Plugin {
+  return {
+    name: "nanobot-specialize-pierre-diff-worker",
+    enforce: "pre",
+    transform(code, id) {
+      if (!id.includes(PIERRE_WORKER_MODULES) || !code.includes("__DIFFS_WORKER__")) return;
+      // Pierre's pool resolves grammars and themes on the main thread and sends them to the worker.
+      return transformWithEsbuild(code, id, {
+        loader: "js",
+        define: { __DIFFS_WORKER__: "true" },
+        minifySyntax: true,
+      });
+    },
+    generateBundle(_options, bundle) {
+      const chunks = Object.values(bundle).filter((output) => output.type === "chunk");
+      if (!chunks.some((chunk) => chunk.isEntry && chunk.facadeModuleId?.includes(PIERRE_WORKER_MODULES))) return;
+      if (chunks.some((chunk) => chunk.moduleIds.some((id) => /\/node_modules\/@shikijs\/(?:langs|themes)\//.test(id)))) {
+        this.error("Pierre diff Worker bundles Shiki grammars or themes that should come from the main thread");
       }
     },
   };
@@ -58,6 +122,12 @@ export function gzipWebuiAssets(): Plugin {
   };
 }
 
+const HTML_SERIALIZER_PACKAGES = [
+  "hast-util-to-html", "hast-util-whitespace", "property-information", "html-void-elements",
+  "comma-separated-tokens", "space-separated-tokens", "stringify-entities", "ccount",
+  "character-entities-html4", "character-entities-legacy", "zwitch",
+];
+
 export function webuiManualChunk(id: string): string | undefined {
   const locale = /\/webui\/locales\/([^/]+)\.json$/.exec(id)?.[1]
     ?? /\/src\/i18n\/locales\/([^/]+)\/common\.json$/.exec(id)?.[1];
@@ -79,22 +149,11 @@ export function webuiManualChunk(id: string): string | undefined {
   ) {
     return "react-vendor";
   }
-  if (id.includes("node_modules/refractor/lang/")) {
-    return;
-  }
-  // Streamdown lazy-loads diagrams and highlighted code. Keep those modules
-  // outside the core markdown chunk so ordinary replies do not download them.
+  // Streamdown retains a lazy viewer shell, not the native Mermaid engine.
   if (id.includes("node_modules/streamdown/dist/mermaid-")) return "markdown-diagrams";
   if (id.includes("node_modules/streamdown/dist/highlighted-body-")) return "markdown-code";
-  // Refractor reaches this HAST helper through hastscript. Keeping it with
-  // Refractor prevents syntax-highlight <-> markdown-vendor circular chunks.
-  if (
-    id.includes("node_modules/react-syntax-highlighter")
-    || id.includes("node_modules/refractor/core")
-    || id.includes("node_modules/hast-util-parse-selector")
-  ) {
-    return "syntax-highlight";
-  }
+  // Keep the serializer and its dependencies together so syntax highlighting never loads the Markdown parser.
+  if (HTML_SERIALIZER_PACKAGES.some((name) => id.includes(`/node_modules/${name}/`))) return "html-serializer";
   if (
     id.includes("node_modules/streamdown")
     || id.includes("node_modules/remend")
@@ -119,7 +178,7 @@ export default defineConfig(({ mode }) => {
   const hmrPath = "/__nanobot_vite_hmr";
 
   return {
-    plugins: [react(), guardWebuiEntryChunk(), gzipWebuiAssets()],
+    plugins: [react(), startupSkeleton(), componentGallery(path.resolve(__dirname, "..")), guardWebuiChunkBoundaries(), gzipWebuiAssets()],
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "./src"),
@@ -132,8 +191,16 @@ export default defineConfig(({ mode }) => {
       // Pre-bundle Dialog up front, including lazy settings/sheets. Excluding
       // it splits its layer/focus state from optimized Popover and DropdownMenu,
       // so nested overlays can dismiss the wrong layer in development.
-      include: ["@radix-ui/react-dialog"],
+      include: [
+        "@radix-ui/react-dialog",
+        "@pierre/diffs", "@pierre/diffs/worker", "@pierre/highlights",
+        "shiki/core", "shiki/langs", "shiki/engine/javascript",
+        // Vite's HTML scan does not follow the lazy Worker entry. Discovering
+        // these imports on first render would reload the page and lose UI state.
+        "pele/lazy", "saxes", "css-tree/parser", "css-tree/walker", "css-tree/generator",
+      ],
     },
+    worker: { format: "es", plugins: () => [specializePierreDiffWorker()] },
     build: {
       outDir: path.resolve(__dirname, "../nanobot/web/dist"),
       emptyOutDir: true,
@@ -169,10 +236,14 @@ export default defineConfig(({ mode }) => {
       environment: "happy-dom",
       globals: true,
       setupFiles: ["./src/tests/setup.ts"],
+      include: [
+        "src/**/*.{test,spec}.{ts,tsx}",
+        "../nanobot/channels/*/tests/webui/**/*.{test,spec}.{ts,tsx}",
+      ],
       coverage: {
         provider: "v8",
         include: ["src/**/*.{ts,tsx}"],
-        exclude: ["src/tests/**", "src/**/*.d.ts"],
+        exclude: ["src/tests/**", "src/dev/**", "src/**/*.d.ts"],
         reporter: ["text", "json-summary"],
         thresholds: {
           statements: 85,

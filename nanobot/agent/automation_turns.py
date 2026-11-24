@@ -1,9 +1,6 @@
-"""Shared coordination for session-bound automation turns."""
-
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 from collections.abc import Awaitable, Callable, Iterable
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
@@ -13,50 +10,31 @@ class AutomationTurnError(RuntimeError):
     """Raised when an automation turn reaches the agent and finishes with an error."""
 
 
-async def publish_next_deferred_turn(
-    *,
-    deferred_queues: dict[str, list[InboundMessage]],
-    publish_inbound: Callable[[InboundMessage], Awaitable[None]],
-    session_key: str,
-) -> bool:
-    """Publish the next deferred automation turn for a session."""
-    queue = deferred_queues.get(session_key)
-    if not queue:
-        return False
-    msg = queue.pop(0)
-    if not queue:
-        deferred_queues.pop(session_key, None)
-    await publish_inbound(msg)
-    return True
-
-
 class AutomationTurnCoordinator:
     """Manage automation turns without mixing them into live injections."""
 
     def __init__(
         self,
         *,
-        publish_inbound: Callable[[InboundMessage], Awaitable[None]],
-        dispatch: Callable[[InboundMessage], Awaitable[object]],
-        is_running: Callable[[], bool],
+        enqueue: Callable[[InboundMessage], Awaitable[None]],
         turn_id: Callable[[InboundMessage], str | None],
         pending_id: Callable[[InboundMessage], str | None],
-        should_defer_turn: Callable[[InboundMessage, str, Iterable[str]], bool],
+        should_defer_turn: Callable[[InboundMessage], bool],
         missing_id_error: str,
         duplicate_id_error: Callable[[str], str],
-        deferred_queues: dict[str, list[InboundMessage]] | None = None,
     ) -> None:
-        self._publish_inbound = publish_inbound
-        self._dispatch = dispatch
-        self._is_running = is_running
+        self._enqueue = enqueue
         self._turn_id = turn_id
         self._pending_id = pending_id
         self._should_defer_turn = should_defer_turn
         self._missing_id_error = missing_id_error
         self._duplicate_id_error = duplicate_id_error
-        self.deferred_queues = deferred_queues if deferred_queues is not None else {}
         self._waiters: dict[str, asyncio.Future[OutboundMessage | None]] = {}
         self._pending_messages_by_turn_id: dict[str, InboundMessage] = {}
+
+    def owns_turn(self, msg: InboundMessage) -> bool:
+        """Whether this message requires an independent automation completion."""
+        return bool(self._turn_id(msg))
 
     async def submit(self, msg: InboundMessage) -> OutboundMessage | None:
         """Submit an automation turn and wait for its session response."""
@@ -71,10 +49,7 @@ class AutomationTurnCoordinator:
         self._waiters[turn_id] = future
         self._pending_messages_by_turn_id[turn_id] = msg
         try:
-            if self._is_running():
-                await self._publish_inbound(msg)
-            else:
-                await self._dispatch(msg)
+            await self._enqueue(msg)
             try:
                 return await future
             except asyncio.CancelledError:
@@ -87,24 +62,9 @@ class AutomationTurnCoordinator:
             self._waiters.pop(turn_id, None)
             self._pending_messages_by_turn_id.pop(turn_id, None)
 
-    def defer_if_active(
-        self,
-        msg: InboundMessage,
-        *,
-        session_key: str,
-        active_session_keys: Iterable[str],
-    ) -> bool:
-        """Defer an automation turn when its target session is already active."""
-        if not self._should_defer_turn(msg, session_key, active_session_keys):
-            return False
-        pending_msg = msg
-        if session_key != msg.session_key:
-            pending_msg = dataclasses.replace(
-                msg,
-                session_key_override=session_key,
-            )
-        self.deferred_queues.setdefault(session_key, []).append(pending_msg)
-        return True
+    def should_defer(self, msg: InboundMessage) -> bool:
+        """Whether this turn waits for an already-active inbox to become idle."""
+        return self._should_defer_turn(msg)
 
     def complete(
         self,
@@ -126,10 +86,12 @@ class AutomationTurnCoordinator:
         else:
             future.set_result(response)
 
-    def pending_ids_for_session(self, session_key: str) -> set[str]:
+    def pending_ids_for_session(
+        self, session_key: str, deferred: Iterable[InboundMessage],
+    ) -> set[str]:
         """Return automation IDs that are waiting for or running in *session_key*."""
         pending_ids: set[str] = set()
-        for msg in self.deferred_queues.get(session_key, []):
+        for msg in deferred:
             pending_id = self._pending_id(msg)
             if pending_id:
                 pending_ids.add(pending_id)

@@ -1,9 +1,13 @@
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, vi } from "vitest";
 import { SettingsView } from "@/components/settings/SettingsView";
+import { ToastProvider } from "@/components/ui/toast";
 import { ClientProvider } from "@/providers/ClientProvider";
 import type { SettingsPayload } from "@/lib/types";
+import type { NanobotClient } from "@/lib/nanobot-client";
+
+export { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 
 export const requestMutationMock = vi.fn();
 
@@ -56,16 +60,10 @@ export function settingsPayload(): SettingsPayload {
     },
     web: {
       enable: true,
-      proxy: null,
+      use_proxy: false,
       user_agent: null,
       search: { max_results: 5, timeout: 30 },
       fetch: { use_jina_reader: true },
-    },
-    api: {
-      host: "127.0.0.1",
-      port: 8900,
-      timeout: 120,
-      api_key_hint: null,
     },
     observability: {
       provider: "langfuse",
@@ -95,7 +93,6 @@ export function settingsPayload(): SettingsPayload {
       dream: {
         schedule: "every 2h",
       },
-      unified_session: false,
     },
     advanced: {
       restrict_to_workspace: false,
@@ -122,39 +119,44 @@ export function settingsPayload(): SettingsPayload {
   };
 }
 
-export function renderSettingsView(
-  options: {
-    initialSection?:
-      | "overview"
-      | "appearance"
-      | "apps"
-      | "skills"
-      | "channels"
-      | "automations"
-      | "advanced"
-      | "models"
-      | "image"
-      | "browser"
-      | "runtime";
-    initialSettings?: SettingsPayload;
-    showSidebar?: boolean;
-    mainNavigationExpanded?: boolean;
-    onBackToChat?: () => void;
-    onSettingsChange?: (payload: SettingsPayload) => void;
-    onStartAutomationChat?: React.ComponentProps<typeof SettingsView>["onStartAutomationChat"];
-    onNativeEngineRestart?: () => Promise<string>;
-    onRestart?: () => void;
-  } = {},
-) {
+type SettingsViewTestOptions = Partial<Pick<
+  React.ComponentProps<typeof SettingsView>,
+  | "initialSection"
+  | "focusTarget"
+  | "initialSettings"
+  | "themePreference"
+  | "onChangeTheme"
+  | "skills"
+  | "skillsLoading"
+  | "showSidebar"
+  | "mainNavigationExpanded"
+  | "onBackToChat"
+  | "onSettingsChange"
+  | "onStartAutomationChat"
+  | "onNativeEngineRestart"
+  | "onRestart"
+>> & { client?: NanobotClient; webuiCapabilities?: string[] };
+
+export function renderSettingsView(options: SettingsViewTestOptions = {}) {
   render(
-    <ClientProvider client={{ requestMutation: requestMutationMock } as never} token="tok">
+    <ClientProvider client={options.client ?? {
+      requestMutation: requestMutationMock,
+      status: "open",
+      onStatus: (handler: (status: "open") => void) => {
+        handler("open");
+        return () => {};
+      },
+    } as never} token="tok" webuiCapabilities={options.webuiCapabilities}>
       <SettingsView
-        theme="light"
+        themePreference={options.themePreference ?? "light"}
         initialSection={options.initialSection ?? "apps"}
+        focusTarget={options.focusTarget}
         initialSettings={options.initialSettings}
+        skills={options.skills}
+        skillsLoading={options.skillsLoading}
         showSidebar={options.showSidebar}
         mainNavigationExpanded={options.mainNavigationExpanded}
-        onToggleTheme={() => {}}
+        onChangeTheme={options.onChangeTheme ?? (() => {})}
         onBackToChat={options.onBackToChat ?? (() => {})}
         onModelNameChange={() => {}}
         onSettingsChange={options.onSettingsChange}
@@ -163,11 +165,22 @@ export function renderSettingsView(
         onRestart={options.onRestart}
       />
     </ClientProvider>,
+    { wrapper: ToastProvider },
   );
 }
 
 export async function openPopover(trigger: HTMLElement) {
   await userEvent.setup().click(trigger);
+}
+
+export async function selectToolType(name: string) {
+  const types = await screen.findByRole("radiogroup", { name: "Tool type" });
+  await userEvent.click(within(types).getByRole("radio", { name }));
+}
+
+export async function showOnlyReadyTools(ready: boolean) {
+  const toggle = await screen.findByRole("switch", { name: "Ready only" });
+  if ((toggle.getAttribute("aria-checked") === "true") !== ready) await userEvent.click(toggle);
 }
 
 export function installSettingsViewTestHooks() {

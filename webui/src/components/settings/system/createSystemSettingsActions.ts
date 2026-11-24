@@ -2,7 +2,6 @@ import type { Dispatch, SetStateAction } from "react";
 import type { TFunction } from "i18next";
 
 import type {
-  ApplySettingsPayload,
   MaybeRestartHostEngine,
   PendingRestartSections,
 } from "@/components/settings/contracts";
@@ -11,11 +10,10 @@ import { DEFAULT_CUSTOM_MCP_FORM } from "@/components/settings/system/AppsSettin
 import type { SystemSettingsState } from "@/components/settings/system/useSystemSettingsState";
 import {
   cancelMcpOAuth,
+  changeAutomationChat,
   completeMcpOAuth,
   disableNanobotFeature,
   enableNanobotFeature,
-  fetchNanobotFeatures,
-  fetchSettings,
   fetchMcpOAuthStatus,
   fetchMcpPresets,
   importMcpConfig,
@@ -24,8 +22,6 @@ import {
   runMcpPresetAction,
   saveCustomMcpServer,
   startMcpOAuth,
-  startApiService,
-  stopApiService,
   updateAutomation,
   updateMcpServerTools,
 } from "@/lib/api";
@@ -34,6 +30,7 @@ import { notifyMcpPresetsChanged } from "@/lib/mcp-preset-events";
 import type { NanobotClient } from "@/lib/nanobot-client";
 import type {
   AutomationUpdatePayload,
+  AutomationChatUpdate,
   McpOAuthFlowPayload,
   McpPresetsPayload,
   NanobotFeatureInfo,
@@ -69,10 +66,8 @@ interface SystemSettingsActionsOptions {
   state: SystemSettingsState;
   featureCatalog: NanobotFeatureInfo[];
   client: NanobotClient;
-  token: string;
   getToken: () => string;
   t: TFunction;
-  applyPayload: ApplySettingsPayload;
   maybeRestartHostEngine: MaybeRestartHostEngine;
   setPendingRestartSections: Dispatch<SetStateAction<PendingRestartSections>>;
   refreshAutomations: (showLoading?: boolean) => Promise<void>;
@@ -82,16 +77,13 @@ export function createSystemSettingsActions({
   state,
   featureCatalog,
   client,
-  token,
   getToken,
   t,
-  applyPayload,
   maybeRestartHostEngine,
   setPendingRestartSections,
   refreshAutomations,
 }: SystemSettingsActionsOptions) {
   const {
-    apiServiceAction,
     customMcpForm,
     mcpConfigImport,
     mcpOAuthCallbackUrl,
@@ -100,10 +92,8 @@ export function createSystemSettingsActions({
     mcpOAuthPopupRef,
     nanobotFeatureActionRef,
     nanobotFeatures,
-    setApiService,
-    setApiServiceAction,
-    setApiServiceError,
     setAutomationAction,
+    setAutomationDialogError,
     setAutomationPendingDelete,
     setAutomationPendingEdit,
     setAutomations,
@@ -170,29 +160,6 @@ export function createSystemSettingsActions({
     }
   };
 
-  const handleApiServiceAction = async (
-    action: "start" | "stop",
-    values?: { host: string; port: number; timeout: number; apiKey?: string },
-  ) => {
-    if (apiServiceAction) return;
-    setApiServiceAction(action);
-    setApiServiceError(null);
-    try {
-      const payload = action === "start"
-        ? await startApiService(client, values!)
-        : await stopApiService(client);
-      setApiService(payload);
-      const refreshed = await fetchNanobotFeatures(token);
-      setNanobotFeatures(refreshed);
-      const nextSettings = await fetchSettings(token);
-      applyPayload(nextSettings);
-    } catch (err) {
-      setApiServiceError((err as Error).message);
-    } finally {
-      setApiServiceAction(null);
-    }
-  };
-
   const handleCliAppAction = async (
     action: "install" | "update" | "uninstall" | "test",
     name: string,
@@ -206,6 +173,7 @@ export function createSystemSettingsActions({
       setCliApps(payload);
       if (action !== "test") {
         notifyCliAppsChanged(payload);
+        state.toolsCatalog.invalidateMcpPresets();
       }
       setCliAppsMessage(payload.last_action?.message ?? null);
       setCliAppsFocusName(action === "uninstall" ? null : name);
@@ -263,8 +231,9 @@ export function createSystemSettingsActions({
     job: SessionAutomationJob,
   ) => {
     const key = `${action}:${job.id}`;
+    const reportError = action === "delete" ? setAutomationDialogError : setAutomationsError;
     setAutomationAction(key);
-    setAutomationsError(null);
+    reportError(null);
     try {
       const payload = await runAutomationAction(client, action, job.id);
       setAutomations(payload);
@@ -274,7 +243,7 @@ export function createSystemSettingsActions({
         window.setTimeout(() => void refreshAutomations(false), 4000);
       }
     } catch (err) {
-      setAutomationsError((err as Error).message);
+      reportError(err instanceof Error ? err.message : String(err));
     } finally {
       setAutomationAction(null);
     }
@@ -286,16 +255,36 @@ export function createSystemSettingsActions({
   ) => {
     const key = `update:${job.id}`;
     setAutomationAction(key);
-    setAutomationsError(null);
+    setAutomationDialogError(null);
     try {
       const payload = await updateAutomation(client, job.id, values);
       setAutomations(payload);
       setAutomationPendingEdit(null);
     } catch (err) {
-      setAutomationsError((err as Error).message);
+      setAutomationDialogError(err instanceof Error ? err.message : String(err));
     } finally {
       setAutomationAction(null);
     }
+  };
+
+  const handleAutomationChat = async (job: SessionAutomationJob, values: AutomationChatUpdate) => {
+    // The dialog owns the draft and error. Publish only the server acknowledgement.
+    const payload = await changeAutomationChat(client, job.id, values);
+    setAutomations(payload);
+  };
+
+  const retireMcpProxyDrafts = (names: string[]) => {
+    setMcpFieldValues((prev) => {
+      const next = { ...prev };
+      for (const name of names) {
+        const key = name.trim().toLowerCase();
+        if (prev[key]?.use_proxy === undefined) continue;
+        const fields = { ...prev[key] };
+        delete fields.use_proxy;
+        next[key] = fields;
+      }
+      return next;
+    });
   };
 
   const closeMcpOAuthPopup = () => {
@@ -382,6 +371,7 @@ export function createSystemSettingsActions({
       try {
         const payload = await fetchMcpPresets(getToken());
         setMcpPresets(payload);
+        retireMcpProxyDrafts([flow.name]);
         notifyMcpPresetsChanged(payload);
         setMcpMessage(null);
         setMcpError(null);
@@ -391,6 +381,7 @@ export function createSystemSettingsActions({
       return;
     }
 
+    state.toolsCatalog.invalidate();
     if (flow.status === "authorized" && flow.hot_reload) {
       if (flow.hot_reload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
@@ -450,7 +441,11 @@ export function createSystemSettingsActions({
     }
   };
 
-  const handleMcpOAuthConnect = async (name: string, reset = false) => {
+  const handleMcpOAuthConnect = async (
+    name: string,
+    reset = false,
+    values: Record<string, string> = {},
+  ) => {
     openMcpOAuthPopup();
     const key = `oauth:${name}`;
     setMcpPresetAction(key);
@@ -460,7 +455,8 @@ export function createSystemSettingsActions({
     setMcpOAuthCompleting(false);
     setMcpOAuthCallbackError(null);
     try {
-      const flow = await startMcpOAuth(client, name, reset);
+      const flow = await startMcpOAuth(client, name, reset, values)
+        .finally(() => state.toolsCatalog.invalidate());
       mcpOAuthFlowRef.current = flow;
       setMcpOAuthFlow(flow);
       navigateMcpOAuthPopup(flow);
@@ -548,7 +544,7 @@ export function createSystemSettingsActions({
   };
 
   const handleMcpPresetAction = async (
-    action: "enable" | "disable" | "remove" | "test" | "reconnect",
+    action: "enable" | "disable" | "remove" | "test" | "reconnect" | "proxy",
     name: string,
     values: Record<string, string> = {},
   ) => {
@@ -565,6 +561,12 @@ export function createSystemSettingsActions({
       }
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
+      }
+      if (
+        (action === "proxy" || action === "remove")
+        && payload.last_action?.ok !== false
+      ) {
+        retireMcpProxyDrafts([name]);
       }
       await maybeRestartHostEngine(payload);
       if (action === "enable") {
@@ -603,6 +605,7 @@ export function createSystemSettingsActions({
             ? customMcpForm.headers
             : "",
         tool_timeout: customMcpForm.toolTimeout,
+        ...(customMcpForm.transport !== "stdio" ? { use_proxy: String(customMcpForm.useProxy) } : {}),
       });
       setMcpPresets(payload);
       applyMcpActionFeedback(
@@ -610,6 +613,9 @@ export function createSystemSettingsActions({
         false,
         expectsOAuthAuthorization ? name : undefined,
       );
+      if (payload.last_action?.ok !== false) {
+        retireMcpProxyDrafts([name]);
+      }
       notifyMcpPresetsChanged(payload);
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
@@ -631,6 +637,11 @@ export function createSystemSettingsActions({
       const payload = await importMcpConfig(client, mcpConfigImport);
       setMcpPresets(payload);
       applyMcpActionFeedback(payload);
+      if (payload.last_action?.ok !== false) {
+        // The accepted import has been validated by the server; its response has no name list.
+        const config: { mcpServers?: object } = JSON.parse(mcpConfigImport);
+        retireMcpProxyDrafts(Object.keys(config.mcpServers ?? config));
+      }
       notifyMcpPresetsChanged(payload);
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
@@ -665,9 +676,9 @@ export function createSystemSettingsActions({
   };
 
   return {
-    handleApiServiceAction,
     handleAutomationAction,
     handleAutomationEdit,
+    handleAutomationChat,
     handleCliAppAction,
     handleImportMcpConfig,
     handleMcpOAuthCancel,

@@ -1,5 +1,3 @@
-"""Composition helpers for the embedded WebUI gateway."""
-
 from __future__ import annotations
 
 from collections.abc import Awaitable, Mapping
@@ -9,7 +7,11 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger as default_logger
 
+from nanobot.channels.websocket.attachment_http import AttachmentHTTP
+from nanobot.channels.websocket.attachment_store import AttachmentStore
 from nanobot.config.loader import get_config_path
+from nanobot.config.paths import get_media_dir
+from nanobot.webui.automation_routes import WebUIAutomationRoutes
 from nanobot.webui.gateway_endpoint import WebUIGatewayEndpoint
 from nanobot.webui.gateway_tokens import GatewayTokenStore
 from nanobot.webui.ingress_policy import DEFAULT_WEBUI_INGRESS_POLICY, WebUIIngressPolicy
@@ -22,6 +24,7 @@ from nanobot.webui.workspaces import WebUIWorkspaceController
 from nanobot.webui.ws_http import GatewayHTTPHandler
 
 if TYPE_CHECKING:
+    from nanobot.agent.subagent import SubagentManager
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.websocket.runtime import WebSocketConfig
     from nanobot.cron.service import CronService
@@ -38,6 +41,7 @@ class GatewayServices:
     settings: WebUISettingsServices
     tokens: GatewayTokenStore
     media: WebUIMediaGateway
+    uploads: AttachmentHTTP
     ingress: WebUIIngressPolicy
     transcripts: WebUITranscriptRecorder
     workspaces: WebUIWorkspaceController
@@ -72,8 +76,11 @@ def build_gateway_services(
     channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
     mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
     mcp_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
+    image_generation_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
     skill_state_action: Callable[[set[str]], None] | None = None,
     recovery_action: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None = None,
+    subagent_manager: SubagentManager | None = None,
+    discard_session: Callable[[str], Awaitable[None]] | None = None,
     logger: Any = default_logger,
 ) -> GatewayServices:
     settings = WebUISettingsServices.create(
@@ -98,9 +105,11 @@ def build_gateway_services(
     media = WebUIMediaGateway(
         workspace_path=workspace_path,
         logger=logger,
-        attachment_limits=ingress.attachments,
     )
-    transcripts = WebUITranscriptRecorder(log=logger)
+    uploads = AttachmentHTTP(AttachmentStore(
+        get_media_dir("websocket"), limits=ingress.attachments,
+    ))
+    transcripts = WebUITranscriptRecorder(session_manager, log=logger)
     workspaces = WebUIWorkspaceController(
         session_manager=session_manager,
         default_workspace=workspace_path,
@@ -112,7 +121,7 @@ def build_gateway_services(
         workspaces=workspaces,
         logger=logger,
     )
-    session_projection = WebUISessionProjection(session_manager, log=logger)
+    session_projection = WebUISessionProjection(session_manager, subagent_manager=subagent_manager, log=logger)
     http = GatewayHTTPHandler(
         config=config,
         session_manager=session_manager,
@@ -128,16 +137,25 @@ def build_gateway_services(
         settings=settings,
         skills_workspace_path=workspace_path,
         disabled_skills=disabled_skills,
-        cron_service=cron_service,
-        local_trigger_store=local_trigger_store,
-        cron_pending_job_ids=cron_pending_job_ids,
-        local_trigger_pending_ids=local_trigger_pending_ids,
+        automation_routes=WebUIAutomationRoutes(
+            session_manager=session_manager,
+            workspaces=workspaces,
+            cron_service=cron_service,
+            local_trigger_store=local_trigger_store,
+            cron_pending_job_ids=cron_pending_job_ids,
+            local_trigger_pending_ids=local_trigger_pending_ids,
+            channel_runtime_status=channel_runtime_status,
+            log=logger,
+        ),
         channel_feature_action=channel_feature_action,
         channel_runtime_status=channel_runtime_status,
         mcp_runtime_status=mcp_runtime_status,
         mcp_reload=mcp_reload,
+        image_generation_reload=image_generation_reload,
         skill_state_action=skill_state_action,
         recovery_action=recovery_action,
+        subagent_manager=subagent_manager,
+        discard_session=discard_session,
         log=logger,
     )
     endpoint = WebUIGatewayEndpoint(config=config, http=http, tokens=tokens)
@@ -147,6 +165,7 @@ def build_gateway_services(
         settings=settings,
         tokens=tokens,
         media=media,
+        uploads=uploads,
         ingress=ingress,
         transcripts=transcripts,
         workspaces=workspaces,

@@ -1,9 +1,8 @@
 import type { ChannelUiContribution } from "@/channel-plugins/types";
-import { chatAppGuideUrl } from "@/components/settings/channels/catalog";
+import { chatAppGuideUrl } from "@/channel-plugins/catalog";
 
 export default {
   presentation: {
-    logoUrl: "https://work.weixin.qq.com/favicon.ico",
     displayName: "WeCom",
     initials: "WC",
     color: "#2F7DFF",

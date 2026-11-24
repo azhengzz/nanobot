@@ -1,9 +1,8 @@
 import type { ChannelUiContribution } from "@/channel-plugins/types";
-import { chatAppGuideUrl } from "@/components/settings/channels/catalog";
+import { chatAppGuideUrl } from "@/channel-plugins/catalog";
 
 export default {
   presentation: {
-    logoUrl: "https://napneko.github.io/assets/newnewlogo.png",
     displayName: "NapCat",
     initials: "NC",
     color: "#F97316",

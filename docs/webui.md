@@ -2,53 +2,26 @@
 
 <!-- Meta description: Run nanobot from a browser WebUI with persistent and temporary chats, visible tool activity, workspace controls, Apps, skill discovery, settings, and Automations. -->
 
-The WebUI is nanobot's browser workbench for persistent topics, grouped
-conversation panes, temporary chats, visible agent activity, workspace controls,
-Apps, skill discovery, settings, and Automations in one place. It shares the
-gateway and saved sessions with the native terminal client.
+The WebUI is nanobot's browser workbench. It is included with `nanobot-ai` and shares the same gateway, settings, and saved conversations as the terminal UI (TUI).
 
 For a visual tour, see the [README feature gallery](../README.md#-webui).
-This guide follows the current source tree; some features are newer than the
-published release.
-
-The published `nanobot-ai` wheel already includes the WebUI bundle. You only need
-the `webui/` source directory when you are changing the frontend itself.
 
 ## Open the WebUI
-
-Use the launcher:
 
 ```bash
 nanobot webui
 ```
 
-`nanobot webui` creates the config/workspace when needed, enables the local
-WebSocket channel after confirmation, generates a WebUI bootstrap secret when
-one is missing, starts or joins the same on-demand gateway used by the native
-TUI, and opens the browser. With a fresh config,
-it can open before a model is configured so you can finish setup in **Settings
-→ Models**. The first-run path binds the WebUI to `127.0.0.1` by default, so
-it is not available from other devices on your LAN. While the launcher remains
-attached, it mirrors new log output from that exact gateway instance in the
-terminal without replaying older logs.
+On a fresh install, nanobot creates your config and workspace, starts the local gateway, and opens a signed-in browser window at `http://127.0.0.1:8765` (accessible only from your computer). Before your first chat, add a provider and model in **Settings → Models** (see [Configure Your Model](./quick-start.md#2-configure-your-model)).
 
-After model setup, explicitly promote the shared gateway when you do not want to keep a client open:
+With the official installer, the gateway stays running in the background after you close the browser or terminal. Manage it with `nanobot gateway status`, `logs`, `restart`, and `stop`. For other install methods (such as `uv` or `pip`), use `nanobot webui --detach` or `nanobot gateway --background` to keep it running in the background.
 
-```bash
-nanobot gateway --background
-```
+To sign in from another browser on the same machine, copy the **complete login link** printed in the terminal (shaped like `http://127.0.0.1:8765/#...`, including everything after `#`)—the bare address without the `#...` token will not sign a new browser in. Keep that link private. Use `nanobot webui --no-open` to print the link without launching a browser.
 
-`nanobot webui --background` is retained only to print migration guidance. This keeps one
-unambiguous owner for persistent process lifecycle.
+<details>
+<summary>Manual configuration for the local WebUI</summary>
 
-Each foreground WebUI or TUI launcher releases only its own client. The last
-interactive launcher stops an on-demand gateway. `nanobot gateway --background` makes the
-gateway persistent; manage it with `nanobot gateway status`, `nanobot gateway
-logs`, `nanobot gateway restart`, and `nanobot gateway stop`.
-
-Manual config still works. Same-machine localhost WebUI access can run without
-a browser password. Set `tokenIssueSecret` when you intentionally expose the
-WebUI beyond localhost or want a browser password:
+Localhost access does not require a browser password by default. To require a password or allow access from other devices, set `tokenIssueSecret` in `~/.nanobot/config.json`:
 
 ```json
 {
@@ -63,311 +36,163 @@ WebUI beyond localhost or want a browser password:
 }
 ```
 
-The WebUI is served by the WebSocket channel on port `8765` by default. The
-gateway health endpoint, `18790` by default, is not the browser UI.
+</details>
 
-## First 10 Minutes
+### macOS Dock icon
 
-Use the WebUI as the primary setup surface:
+On a local macOS desktop, `nanobot webui` adds a Dock shortcut to your running WebUI (`--no-dock` disables it). Quitting or hiding the Dock icon only hides the shortcut; it does not stop the gateway or running tasks.
 
-1. Open **Settings → Models** and configure a provider, credential, and active model preset.
-2. Send `Hello!` in a new topic to prove the selected model works.
-3. Start a separate topic before project work, then choose the intended workspace and access mode.
-4. Add only one capability next: a chat channel in **Settings → Channels**, a web/voice/image provider in **Settings**, or an App/MCP integration in **Apps**.
-5. Restart when the WebUI shows a restart requirement, then test that capability with the smallest possible request.
+## Overview
 
-This path avoids hand-editing `config.json` for normal setup. Use the reference docs when you need an option the WebUI does not expose or when you manage config as code.
-
-## What It Is For
-
-| Area | Use it for |
+| Area | What you can do |
 |---|---|
-| Topics | Start persistent topics or temporary chats; switch, search, reorder, fork, or delete persistent topics |
-| Conversation groups | Arrange up to four independent topics in one workbench with resizable panes |
-| Agent activity | See thinking, tool calls, file edits with diffs, command output, and generated artifacts in context |
-| Context usage | Inspect current context size, per-round token and cache usage, and compaction progress |
-| Workspace | Pick the project workspace before asking for file or shell work |
-| Access | Choose the access mode for local capabilities allowed by your gateway configuration |
-| Composer | Send text, images, voice input, slash commands, and `@` mentions for topics, Apps, or MCP presets |
-| Channels | Connect and validate chat platforms, install their optional support, and manage saved channel setup |
-| Apps | Install, test, update, and use local CLI App adapters and MCP presets |
-| Skills | Inspect and manage installed skills, or discover skills from supported marketplaces |
-| Automations | Review, search, run, pause, edit, and delete scheduled and local-trigger agent turns |
-| Settings | Adjust models, providers, image generation, voice, web tools, runtime, and safety options |
+| Topics | Start persistent topics or temporary chats; search, reorder, rename, archive, fork, or delete topics |
+| Conversation groups | Work in up to four topics side by side with resizable panes |
+| Activity & context | Inspect reasoning, tool calls, file diffs, token/cache usage, and the file graph |
+| Workspace & Access | Pick a project folder and choose **Restricted** or **Full Access** |
+| Composer | Send text, images, files, videos, voice input, `!` shell commands, `/` commands, and `@` mentions |
+| Channels | Connect Telegram, Discord, Slack, Feishu, WeChat, Linear, and more with guided setup |
+| Apps | Manage Agent Plugins, CLI Apps, and MCP servers |
+| Skills | Inspect installed skills or discover new ones from skills.sh and SkillHub |
+| Automations | Review, run, pause, edit, and delete scheduled tasks and local triggers |
+| Settings | Configure models, providers, capabilities, appearance, and updates |
 
-## Topic Workspace
+## Topics and Panes
 
-The sidebar is the topic switcher. Each topic keeps its own history, title,
-workspace selection, and linked automations. Use a new topic when you want a
-separate context; use fork when you want to continue from an existing point
-without changing the original thread.
+Each topic in the sidebar keeps its own history, title, project folder, and linked automations. Use **New topic** for a fresh context, or **Fork** to branch off an existing conversation without changing the original.
 
-Drag a topic within its current sidebar group to keep frequently used work in
-your preferred order. Drag a topic from the sidebar into the composer when you
-want to reference it in the next message instead of switching to it.
+- **Organize:** Drag topics to reorder them, or use **Rename** to edit a title inline.
+- **Bulk actions:** Choose **Select** in a topic's menu to archive or delete multiple topics at once (press `Esc` to exit selection mode). Archived topics stay saved and can be restored from **Show archived**.
+- **Delete with undo:** Deleting a topic hides it with an 8-second **Undo** window. Topics with linked automations pause for confirmation in the toast before starting the undo countdown.
+- **Navigate long conversations:** Use the message rail on wide screens or prompt-summary search in the header to jump directly to earlier messages. Scroll past the top (or pull down on touch devices) to load older history.
 
 ### Conversation groups and panes
 
-Open a topic's sidebar action menu and choose **Create group** to turn it into
-a conversation group. Use **Add pane** in the workbench header to start another
-topic alongside it. A group holds up to four panes. To bring in an existing
-topic, drag it onto the group or use **Move to** in its action menu.
+Open a topic's menu and choose **Create group** to arrange up to four topics side by side. Use **Add pane** in the header to start another topic alongside it, or drag an existing topic into the group.
 
-Use **Pane layout** to choose columns, rows, a grid, BSP, or a main pane with a
-stack. Drag a divider to resize panes. Each pane has its own conversation;
-select one to direct the shared composer to that topic. Group membership and
-layout persist across refreshes. Grouping topics does not merge their histories.
+Selecting a pane targets the composer at that topic. Grouping only arranges panes—it does not merge topic histories. To pull context from another topic, mention it with `@`.
 
-To bring another topic's work into a conversation, select it from the `@` menu
-or drag it from the sidebar into the composer. The agent can read the selected
-session and exchange messages with other saved sessions. See [Composer](#composer)
-for the distinction between an attached reference and plain text.
+### Model options for a topic
 
-### Activity and context usage
+Open the model preset menu beside the composer to adjust **Reasoning effort** (and **Fast** / **Ultrafast** speed boosts on supported Codex models) for the current topic without changing the shared preset. Switching presets resets these per-topic overrides.
 
-The message timeline shows replies and agent activity. Expand the **Worked for**
-section to inspect the reasoning and tool activity for a completed turn.
+## Composer
 
-When the agent writes or edits files, the activity item shows the target path,
-status, and changed line counts. Choose **Settings → Appearance → File edit
-display** to control the detail: **Summary** shows the change summary, **Diff**
-shows available unified patches inline, and **Collapsed diff** lets you expand
-them with **View diff**. Large diffs may hide unchanged lines or truncate the
-inline preview. Select the filename in the activity row to open the read-only
-file preview panel.
+The composer supports text, images, documents, videos, voice input, slash commands, and `@` mentions.
 
-File previews follow the active topic's access mode. Restricted workspace access
-previews only files under the selected workspace. Full Access can preview files
-outside the workspace when that access mode is allowed by the gateway.
-
-Open the context indicator beside the composer model badge to see how much of
-the model's context window is in use. The **Recent rounds** chart shows input
-tokens for each logical model round, including tool-call rounds. Hover or focus
-a bar for input tokens, output tokens, generation time, and the KV cache hit
-rate when reported. Provider usage may be estimated or unavailable; these
-figures are not a billing statement.
-
-When nanobot compacts context, the timeline shows its progress and outcome.
-The compacted summary keeps earlier work available while recent messages remain
-in context. See [Memory](./memory.md) for compaction and Dream consolidation.
-
-## Temporary Chats
-
-Use a temporary chat for a conversation that should not be added to nanobot's
-topic history or long-term memory:
-
-1. Select **New topic**.
-2. Select the **Temporary chat** control in the page header.
-3. Send the first message.
-
-You can keep more than one temporary chat open and switch between them under
-**Temporary chats** in the sidebar while the current WebUI connection remains
-open. Reloading or closing the page, restarting the gateway, or losing the
-WebSocket connection ends all of them. They cannot be recovered afterward.
-
-Temporary does not mean consequence-free. Requests still go to the configured
-model provider, and tools can still change files, run commands, or affect
-external services. Temporary chats always use the default workspace in
-Restricted mode; the project picker and Full Access are unavailable. Commands
-and tools that create durable goals, automations, or subagent work are also
-unavailable. Use a regular topic when you need reusable context, scheduled work,
-or a result you must retain.
+- **Sending:** On desktop, `Enter` sends and `Shift+Enter` adds a newline. On touch devices, `Enter` adds a newline and the send button submits.
+- **Queuing while busy:** While nanobot is replying on desktop, pressing `Enter` adds to a waiting message that sends automatically when the reply finishes. Use **Send now** (or press `Enter` on an empty box) to send it immediately as guidance—a dashed border shows when a follow-up is waiting for the model, returning to normal once the model picks it up.
+- **Attachments:** Drop or select images, PDFs, Office documents, or videos (MP4/WebM/MOV, one per message up to 20 MiB; videos play in the WebUI, though the agent cannot analyze video contents yet).
+- **Attach host files by path:** Paste a file path on the nanobot host on its own line to reference it without uploading or copying (respects the topic's workspace permissions).
+- **Direct shell commands:** Start a message with `!` (such as `!git status`) to run a command directly in the topic's workspace without calling the model.
+- **Mention other topics:** Type `@` (or drag a topic from the sidebar) to reference up to eight topics in one message—for example, *"Summarize @luma"* or *"Send this update to @luma."*
+- **Voice input:** When voice transcription is enabled in Settings, the empty composer shows a microphone button.
+- **Image generation:** Enable image generation in Settings to create and edit images in chat (see [Image Generation](./image-generation.md)).
 
 ## Workspace and Access
 
-Use the workspace picker before starting project-specific work. This gives the
-agent the right project context for file paths, shell commands, and topic
-metadata. A locally hosted WebUI opens the operating system's folder chooser
-when one is available; remote deployments use a manual absolute path on the
-nanobot host. The browser's local filesystem is never used for project selection.
+Click the workspace picker when starting a new topic to browse folders on the nanobot host, jump to recent or starred projects, or enter a path directly (`Cmd/Ctrl+Shift+G`). Changes apply when you click **Confirm**. Saved topics keep their project folder fixed; start a new topic to work in a different project.
 
-Selecting a project does not replace the configured agent workspace. The two
-paths have different responsibilities:
+Selecting a project folder sets the working directory for files and shell commands without changing your agent's identity or memory:
 
 | Selected project provides | Agent workspace continues to provide |
 |---|---|
 | Project `AGENTS.md` | `SOUL.md` and `USER.md` |
-| Relative file paths and shell working directory | Long-term memory and history |
-| The normal read/write boundary in Restricted mode | Custom skills and instance state |
+| Relative file paths and shell working directory | Long-term memory (`memory/`) |
+| The read/write boundary in **Restricted** mode | Custom skills (`skills/`) and instance state |
 
-Project-local `SOUL.md` and `USER.md` files are ignored, and the agent workspace's
-`AGENTS.md` is not inherited by a separately selected project. When the selected
-project is the configured agent workspace, both roles naturally use the same
-directory.
+> [!NOTE]
+> Starting a new topic or selecting a different project does not create separate long-term memory. If you need strict separation between clients or users, use [Multiple Instances](./multiple-instances.md).
 
-The access control in the composer controls the local capability level for the
-chat. It does not bypass your gateway, provider, shell sandbox, or operating
-system configuration; it only selects among the capabilities that are already
-available to the current topic.
+Use the access control in the composer to choose between **Restricted** (file and shell work stays inside the selected project, with narrow read-only access to skills and agent memory wiki) and **Full Access** (when allowed by your gateway config). You can switch access mode while a topic is idle.
 
-In Restricted mode, ordinary file and shell work stays inside the selected
-project. To preserve agent continuity, filesystem/search tools receive narrow,
-read-only access to built-in skills, custom skills in the agent workspace, and
-the exact agent `memory/history.jsonl` file. This does not grant access to
-neighboring memory or profile files, and it does not allow writes outside the
-selected project. These tool exceptions do not broaden the browser's file
-preview boundary.
+## Activity, Previews, and Subtasks
 
-Remote WebUI connections may reduce access for the current workspace and may
-select a different workspace by entering its server-side path. A remote project
-change must use Restricted mode; enabling Full Access remains limited to local
-and native clients.
+### Activity and context usage
 
-## Composer
+While nanobot works, **Working for** shows its live step and timer; click it to view full reasoning and tool calls (or set **Settings → Appearance → Activity details** to **Expanded**). After a turn finishes, expand **Worked for** to inspect the full trace.
 
-The composer supports plain messages, image attachments, voice input when
-transcription is configured, slash commands, and `@` mentions for installed Apps,
-MCP presets, or persisted topics. Topics have short, pronounceable handles such as
-`@luma`; titles are display text rather than addresses. Select a topic
-from the menu, or drag it from the sidebar, to attach its structured reference.
-Typing the same text without selecting it remains plain text.
+Tasks in persistent topics keep running even if your browser disconnects; status and completed replies sync when you reconnect.
 
-The agent can inspect an attached topic with `read_session`. It can discover other
-persisted topics with `list_sessions` and send asynchronous messages with
-`send_session_message`; topic messaging is not limited by workspace scope.
-The model badge shows the current model or preset and links to model settings when
-setup is incomplete.
+Click the context indicator beside the model badge to inspect:
 
-For image generation, configure an image provider first and then use the WebUI
-image mode from the composer. See [`image-generation.md`](./image-generation.md)
-for provider setup and output behavior.
+- **Context usage & recent rounds:** Estimated token usage, generation time, and cache hits (estimates only, not a billing statement).
+- **File graph:** Files read since the last compaction and local Markdown links between them. Click any node to inspect its estimated size or preview the file, and scrub the usage bar to replay earlier rounds.
+
+When a conversation grows long, nanobot summarizes earlier turns while keeping your full chat history visible. You can also run `/compact` anytime (see [Memory](./memory.md)).
+
+### File and diagram previews
+
+File edits show the path and changed line counts. Change **Settings → Appearance → File edit display** between **Summary**, inline **Diff**, and **Collapsed diff**. Click any filename to open a read-only preview tab (text previews up to 384 KiB; PNG/JPEG/GIF/WebP images up to 8 MiB; Markdown renders with a **Source** toggle; Mermaid diagrams render automatically). Right-click a file reference or tab to copy its path.
+
+### Model failures
+
+If a model call fails after automatic retries stop, any partial reply is preserved and the WebUI shows why it failed. Click **Continue** to resume from the saved conversation, or open model settings to fix credentials or switch models. Review completed tool calls before continuing, as the model may re-run tools if needed.
+
+### Delegated work
+
+When nanobot delegates work to subagents, a **Subtasks** bar appears above the composer while tasks are active. Open it to watch live progress, inspect a subtask's read-only trace, or stop an individual subtask. Finished subtasks appear inline beside the message that started them. See [Subagents](./concepts.md#subagents) for cancellation and restart behavior.
+
+## Temporary Chats
+
+Choose **New topic → Temporary chat** when you want a throwaway conversation that does not use your agent profile or long-term memory and is never saved to history.
+
+- You can keep multiple temporary chats open in the sidebar during one browser session.
+- Reloading the page, closing the tab, losing the connection, or restarting the gateway permanently deletes all temporary chats.
+- Temporary chats always run in the default workspace in **Restricted** mode and cannot create goals, automations, or subagents.
+
+> [!WARNING]
+> Temporary does not mean consequence-free. Prompts still go to your AI provider, and tools can still edit files, run commands, or call external services. Files created by tools are not automatically deleted when the chat closes.
 
 ## Channels
 
-Open **Settings → Channels** to connect chat apps without assembling JSON by hand. Search for a platform, open its setup panel, and follow the fields or QR flow shown for that channel. The guided setup can:
+Open **Channels** to connect Telegram, Discord, Slack, Feishu, WeChat, Linear, and other platforms with credential forms or QR codes. On a local WebUI, nanobot can install missing channel packages for you and prompt to restart if needed.
 
-- install missing optional channel support when the WebUI is running locally;
-- collect platform credentials while preserving previously saved values;
-- handle supported QR-based login flows;
-- validate the connection and show actionable setup errors;
-- tell you when the gateway needs to restart.
-
-The platform itself may still require you to create a bot, enable event permissions, copy a token, or configure a webhook. Use [`chat-apps.md`](./chat-apps.md) for those platform-side prerequisites and for manual JSON/reference options.
-
-Test a new channel with a private DM. When a supported channel sends a pairing code, the WebUI surfaces the pending request so you can approve the sender. Keep access narrow; do not use a wildcard allowlist unless public access is intentional.
+Test each new channel with a direct message—if the channel replies with a pairing code, approve it right inside the WebUI. For platform-side setup steps (creating bots, tokens, or permissions), see [Chat Apps](./chat-apps.md).
 
 ## Apps
 
-Open Apps from the sidebar to review and manage installable capabilities. The
-default **Ready** view shows only capabilities that can be used immediately:
+Open **Apps → Ready** and filter by **Agent Plugins**, **CLI Apps**, or **MCP**:
 
-- **Agent Plugins** are local packages that can bundle skills, MCP servers, or
-  both. A package under `<workspace>/plugins/` is installed but remains inactive
-  until you enable it in Apps.
-- **CLI Apps** are local command-line adapters that nanobot runs on your
-  machine. Their installer manages the executable and exposes its adapter
-  through the same plugin activation model. Installing an adapter does not
-  modify the native desktop or web app it connects to.
-- **MCP** lists Model Context Protocol servers. Presets provide known
-  configurations, and the **Add MCP server** panel accepts stdio, HTTP, and SSE
-  servers. Custom HTTP/SSE servers can use no authentication, OAuth, or request
-  headers. After saving an OAuth server, choose **Connect** to open its sign-in
-  page. Presets such as Xmind, Notion, and Linear already use OAuth. HTTPS and
-  localhost WebUIs return automatically; a remote plain-HTTP WebUI shows one
-  field for pasting the complete localhost callback URL.
+- **Agent Plugins:** Local packages under `<workspace>/plugins/` that bundle skills, MCP servers, or both. Enable them in **Apps** to activate them.
+- **CLI Apps:** Local command-line tool adapters on the nanobot host (run in a limited environment without your provider API keys).
+- **MCP:** Add stdio, HTTP, or SSE Model Context Protocol servers, or pick from built-in presets (including OAuth presets like Notion, Linear, and Xmind, and keyless search presets like Firecrawl and Parallel Search).
 
-Apps intentionally does not list nanobot runtime support packages such as
-`api` or `bedrock`. Those packages enable providers, servers, or channels; they
-are not tools that can be attached to a turn with `@`. Manage them from
-**System**, **Models**, or **Web**. PDF and common Office document readers are
-included in nanobot and activate automatically when a file is attached. The
-equivalent CLI for optional integrations remains `nanobot plugins`. See
-[`cli-reference.md`](./cli-reference.md#optional-features).
-That command manages nanobot runtime extras, not Agent Plugin packages.
-
-Some MCP presets connect to hosted keyless endpoints. For example, the Firecrawl
-preset uses Firecrawl's hosted MCP endpoint for search, scrape, crawl, and
-extraction tools without requiring an API key. This does not replace nanobot's
-built-in web search provider; mention the Firecrawl MCP preset with `@` when a
-turn needs Firecrawl's richer web data tools.
-
-The Parallel Search preset connects to the free, anonymous Parallel Search MCP
-endpoint and exposes `web_search` and `web_fetch` without requiring an API key.
-It is an optional integration and does not replace nanobot's built-in web search
-provider; mention `@parallel-search` when a turn should use it.
-
-After a CLI App or MCP server is available, mention it from the composer with
-`@` to attach that tool to the next message. Plugin-provided skills participate
-in normal skill discovery and can be invoked with `$skill-name`.
+Once enabled, mention a CLI App or MCP server with `@` in the composer to use it in your next message, or invoke plugin skills with `$skill-name`.
 
 ## Skills
 
-Open **Skills → Installed** to review built-in and workspace-provided skills.
-You can search and filter them, inspect their instructions and setup
-requirements, enable or disable them, and delete workspace skills you no longer
-want.
+- **Skills → Installed:** Search, inspect, enable/disable, or delete built-in and workspace skills.
+- **Skills → Discover:** Browse and install skills from **skills.sh** (requires Node.js / `npx`) and **SkillHub** (no `npx` needed).
 
-Open **Skills → Discover** to browse or search skills from skills.sh and
-SkillHub. A marketplace skill is copied into the active agent workspace after
-you confirm the installation. skills.sh installation requires Node.js with
-`npx`; SkillHub installation does not.
-
-Marketplace skills are third-party instructions and may include executable
-scripts. Review the source and instructions before installing one, and enable
-only skills you trust with the same files, tools, and credentials available to
-your agent.
+> [!CAUTION]
+> Marketplace skills are third-party instructions and may include scripts. Review them before installing, and only enable skills you trust with your workspace and tools.
 
 ## Automations
 
-Automations are agent turns that run later in a linked topic. Create them from
-the topic or channel where they are supposed to run so nanobot keeps the
-correct target context. When an automation runs, it normally delivers the
-result back to that topic.
+The **Automations** view lets you search, filter, run, pause, edit, and delete scheduled tasks and local triggers. Search supports plain text and filters like `name:backup`, `chat:WeChat`, `schedule:09:30`, `trigger`, and `status:paused`.
 
-For the full automation model, creation flow, trigger CLI usage, and delivery
-semantics, see [`automations.md`](./automations.md).
+Create automations from the topic where you want replies delivered. Local triggers need a message each time they run, so copy their `nanobot trigger ...` command instead of using "Run now". See [Automations](./automations.md) for the complete guide.
 
-There are two user-facing automation types:
+## Settings and Updates
 
-- Scheduled automations, created by the agent's cron tool, run at a time,
-  interval, or cron expression.
-- Local triggers, created with `/trigger <name>`, run when you call a local
-  command such as `nanobot trigger trg_8K4P2Q9X "Review PR #4502"`.
+Settings that require a gateway restart are clearly marked in the WebUI.
 
-For recurring background checks that should stay quiet unless there is something
-useful to report, use the protected heartbeat job by editing `HEARTBEAT.md`
-instead of creating a chat automation.
+- **Appearance:** Choose **System**, **Light**, or **Dark** theme, pick a reading text size (Small, Standard, Large, or custom 14–28 px), choose how much activity/diff detail to show, or set a custom background image (**Settings → Appearance → Background**—PNG, JPEG, or WebP up to 6 MiB, with adjustable blur and fade).
+- **Notifications:** Open **Settings → Notifications** to turn on **Browser notifications** (alerts you when a background task finishes or needs attention; click **Test notification** to verify) and **Completion sound**. Works on localhost or HTTPS (on iPhone/iPad, open from the Home Screen).
+- **Check for updates:** Open **Settings → About** to check for updates. nanobot does not run automatic background version checks or auto-install updates without your confirmation. See [Updating nanobot](./updating.md).
 
-Use the Automations view to:
+## Sharing Access
 
-- Filter by all, active, paused, needs-attention, or system jobs.
-- Search by task name, message, trigger command, linked topic, schedule, or status.
-- Sort by next run, last run, updated time, or name.
-- Run scheduled automations now.
-- Pause or resume, rename, or delete user-created automations.
-- Copy the CLI command for local triggers.
-- Inspect protected system automations without changing them.
+The WebUI is an admin workbench for one nanobot instance. Everyone signed in to the WebUI shares all topics and administrative controls—there are no per-user accounts or private topics.
 
-Search accepts plain text and field filters such as `name:backup`,
-`chat:WeChat`, `schedule:09:30`, `cron:"0 23 * * *"`, `trigger`, and
-`status:paused`.
-
-An automation without a linked topic cannot be enabled or run from the WebUI,
-because nanobot would not know where to deliver the scheduled turn. Recreate it
-from the target topic or channel so the automation has complete context.
-
-Local triggers do not have a WebUI "Run now" action because each run needs a
-message. Use the copied `nanobot trigger ...` command and replace `"message"`
-with the content that should be delivered.
-
-## Settings
-
-Settings is the control surface for browser-local and gateway-backed
-runtime configuration. Use it to review or adjust model presets, providers,
-image generation, voice transcription, web tools, chat channels, Apps,
-Automations, Skills, runtime identity, and advanced safety controls.
-
-Some settings take effect immediately. Runtime settings that affect the gateway
-or agent process may require a restart; the WebUI shows that requirement next to
-the relevant control.
-
-Browser-only display preferences, such as file edit display mode, take effect
-immediately for the current browser and do not change gateway configuration.
+- Only share WebUI access with people you trust to administer the same agent.
+- To let others chat without admin access, connect a [chat app](./chat-apps.md) and approve them via pairing or allowlists.
+- To isolate memory and data between different users or clients, run [separate instances](./multiple-instances.md).
 
 ## LAN Access
 
-To open the WebUI from another device on the same network, bind the WebSocket
-channel to all interfaces and set a token or token issue secret:
+To access the WebUI from another device on your local network, bind it to `0.0.0.0` and set a password (`tokenIssueSecret`):
 
 ```json
 {
@@ -381,57 +206,19 @@ channel to all interfaces and set a token or token issue secret:
 }
 ```
 
-The gateway refuses to start with `host` set to `"0.0.0.0"` unless `token` or
-`tokenIssueSecret` is configured. After the gateway starts, open
-`http://<your-ip>:8765` from the other device and enter the secret in the login
-form.
+The gateway refuses to bind to `0.0.0.0` without `token` or `tokenIssueSecret`. After restarting, open `http://<your-ip>:8765` on the other device and sign in with your secret.
 
-Plain HTTP is enough for basic WebUI access, but browsers expose microphone
-capture only in secure contexts. Voice input works on same-machine localhost;
-from another device, serve the WebUI over HTTPS with a certificate that device
-trusts. Configure [`sslCertfile` and `sslKeyfile`](./websocket.md#tlsssl) on the
-WebSocket channel and open `https://<your-host>:8765`, or terminate HTTPS at a
-reverse proxy and use that proxy's HTTPS URL.
-
-Remote WebUI clients with a valid token can view and use Apps and installed
-skills. Actions that install missing nanobot support packages or third-party
-marketplace skills are blocked by default. To let trusted remote administrators
-perform those installations through the WebUI, opt in explicitly:
-
-```json
-{
-  "tools": {
-    "webuiAllowRemotePackageInstall": true
-  }
-}
-```
-
-Use this only for a private deployment where every authenticated WebUI user is
-trusted to change nanobot's Python environment and install workspace skill
-instructions or scripts. If you publish the WebUI through Nginx, Caddy,
-Cloudflare Tunnel, or a similar service, treat it as remote access and leave
-package and skill installs disabled unless that is intentional.
-
-Optional feature installs use pip's configured package index, including
-`PIP_INDEX_URL`. skills.sh marketplace installs use `npx` instead.
-
-Leave remote package installs disabled when the WebUI is exposed beyond a
-private, trusted network.
+- **Voice input on LAN:** Browsers require HTTPS for microphone access on non-localhost addresses. Configure [TLS/SSL](./websocket.md#tlsssl) or put an HTTPS reverse proxy in front of the WebUI.
+- **Remote installs:** By default, remote browsers cannot install optional packages or marketplace skills. Only enable `tools.webuiAllowRemotePackageInstall: true` on private deployments where every WebUI user is trusted to install packages and scripts on the host.
 
 ## Troubleshooting
 
-If the page does not open, check these in order:
+If the WebUI will not open, check these in order:
 
 1. `nanobot agent -m "Hello!"` works in the same Python environment.
-2. `~/.nanobot/config.json` does not explicitly set `channels.websocket.enabled` to `false`.
-3. `nanobot gateway` is still running.
-4. You are opening port `8765`, not the gateway health port.
-5. LAN access uses `host: "0.0.0.0"` and a token or token issue secret.
+2. `channels.websocket.enabled` is not set to `false` in `~/.nanobot/config.json`.
+3. `nanobot gateway` is running.
+4. You are opening port `8765` (WebUI), not `18790` (gateway health check).
+5. For LAN access, `host` is `"0.0.0.0"` and `tokenIssueSecret` (or `token`) is set.
 
-If voice input asks for a secure connection, use HTTPS with a certificate the
-device trusts. Browsers do not expose microphone capture to
-`http://<your-ip>` origins.
-
-For detailed diagnostics, see
-[`troubleshooting.md#webui-problems`](./troubleshooting.md#webui-problems).
-For frontend development, see [`../webui/README.md`](../webui/README.md).
+For more help, see [WebUI Problems](./troubleshooting.md#webui-problems).

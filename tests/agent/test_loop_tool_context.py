@@ -7,12 +7,14 @@ import pytest
 
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.context import (
     RequestContext,
     bind_request_context,
     current_request_context,
     reset_request_context,
 )
+from nanobot.agent.tools.image_generation import ImageGenerationTool, register_image_generation_tool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
@@ -21,9 +23,10 @@ from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.session.turn_continuation import INTERNAL_CONTINUATION_META
 
 
-class _ContextRecordingTool:
+class _ContextRecordingTool(Tool):
     name = "cron"
-    concurrency_safe = False
+    description = "Record the active request context."
+    parameters = {"type": "object", "properties": {"action": {"type": "string"}}}
 
     def __init__(self) -> None:
         self.contexts: list[dict] = []
@@ -40,24 +43,6 @@ class _ContextRecordingTool:
             "session_key": ctx.session_key,
         })
         return "created"
-
-
-class _Tools:
-    def __init__(self, tool: _ContextRecordingTool) -> None:
-        self.tool = tool
-
-    @property
-    def tool_names(self) -> list[str]:
-        return ["cron"]
-
-    def get(self, name: str):
-        return self.tool if name == "cron" else None
-
-    def get_definitions(self) -> list:
-        return []
-
-    def prepare_call(self, name: str, arguments: dict):
-        return (self.tool, arguments, None) if name == "cron" else (None, arguments, None)
 
 
 def test_loop_registers_default_tools_in_injected_registry(tmp_path: Path) -> None:
@@ -105,6 +90,28 @@ def test_loop_from_config_uses_caller_owned_registry(tmp_path: Path) -> None:
     assert loop.tools.has("read_file")
 
 
+@pytest.mark.parametrize("provider_name", ["openrouter", "aihubmix"])
+def test_loop_uses_pre_registered_image_tool(
+    tmp_path: Path,
+    provider_name: str,
+) -> None:
+    config = _config_for_loop(tmp_path)
+    config.tools.image_generation.enabled = True
+    config.tools.image_generation.provider = provider_name
+    getattr(config.providers, provider_name).api_key = "configured-image-key"
+    registry = ToolRegistry()
+    register_image_generation_tool(config, registry, workspace=config.workspace_path)
+    configured_tool = registry.get("generate_image")
+    loop = AgentLoop.from_config(config, tool_registry=registry, provider=_provider_for_loop())
+
+    tool = registry.get("generate_image")
+    assert loop.tools is registry
+    assert isinstance(tool, ImageGenerationTool)
+    assert tool is configured_tool
+    assert tool.provider_configs[provider_name].api_key == "configured-image-key"
+    assert registry.has("read_file")
+
+
 @pytest.mark.asyncio
 async def test_loop_binds_request_context_for_tool_execution(tmp_path: Path) -> None:
     provider = MagicMock()
@@ -129,7 +136,7 @@ async def test_loop_binds_request_context_for_tool_execution(tmp_path: Path) -> 
         model="test-model",
     )
     cron = _ContextRecordingTool()
-    loop.tools = _Tools(cron)
+    loop.tools.register(cron)
 
     metadata = {"slack": {"thread_ts": "111.222", "channel_type": "channel"}}
     runtime = loop.llm_runtime()

@@ -2,200 +2,121 @@
 
 <!-- Meta description: Create, run, and manage nanobot scheduled automations, local triggers, and heartbeat-backed background checks. -->
 
-Automations are agent turns that run later in a linked topic. Use them
-when nanobot should do work without someone actively typing: reminders,
-recurring checks, nightly summaries, CI follow-ups, local script reports, or
-webhook-driven events.
+Automations let nanobot run tasks on its own—reminders, daily summaries, CI follow-ups, local script reports, or quiet background checks.
 
-Create automations from the chat channel or WebUI topic where the
-result should appear. That lets nanobot keep the right session history,
-workspace, and reply target.
+Always create an automation from the WebUI topic or chat channel where you want its replies to appear. Keep `nanobot gateway` running (your WebUI or TUI already runs one; use `nanobot gateway --background` to keep it alive after closing the terminal).
 
 ## Choose an Automation Type
 
-| Type | Starts from | Best for | Created with |
+| Type | Starts from | Best for | How to create |
 |---|---|---|---|
-| Scheduled automation | Time, interval, or cron expression | Recurring reminders, scheduled summaries, one-time future tasks | Ask nanobot in the target topic to schedule it with the `cron` tool |
-| Local trigger | A local `nanobot trigger ...` command | CI jobs, webhooks, shell scripts, generated reports | `/trigger <name>` in the target topic |
-| Heartbeat | Protected system schedule | Quiet recurring checks that should only report useful results | Edit `<workspace>/HEARTBEAT.md` |
-
-The two user-created automation types are scheduled automations and local
-triggers. Heartbeat uses the same background service but is system-managed and
-protected from normal automation edits.
-
-## Before You Create One
-
-Keep `nanobot gateway` running. The gateway owns background delivery for chat
-apps, WebUI topics, scheduled automations, local triggers, heartbeat, and
-Dream jobs.
-
-Use the same workspace and config for the gateway and any process that sends
-local trigger messages. If you run multiple nanobot instances, pass the matching
-`--config` or `--workspace` option to `nanobot trigger`.
-
-Create each automation from the target topic. An automation without a linked
-topic cannot be enabled or run from the WebUI because nanobot would not know
-where to deliver the turn.
+| **Scheduled automation** | A time, interval, or cron schedule | Reminders, daily reports, one-time future tasks | Ask nanobot in the target chat |
+| **Local trigger** | Running `nanobot trigger ...` from a script or webhook | CI failures, local scripts, external event alerts | Send `/trigger <name>` in the target chat |
+| **Heartbeat** | Built-in periodic check | Quiet background monitoring that only messages you when action is needed | Edit `<workspace>/HEARTBEAT.md` |
 
 ## Scheduled Automations
 
-Scheduled automations are created by the agent's `cron` tool. In practice, ask
-nanobot from the target chat or WebUI topic:
+To create a scheduled task, just ask nanobot in the chat where you want the results delivered:
 
 ```text
 Every weekday at 9am, check open pull requests and summarize blockers here.
 ```
 
-or:
-
 ```text
 Tomorrow at 4pm, remind me to send the release notes.
 ```
 
-The cron tool supports interval schedules, cron expressions, and one-time
-scheduled tasks. Cron expressions can include an IANA timezone such as
-`America/Vancouver`; otherwise nanobot uses the runtime default timezone.
+- **Schedules:** Supports one-time dates, recurring intervals, and cron expressions (with optional IANA timezones like `America/Vancouver`).
+- **Delivery:** By default, nanobot sends the final reply back to the chat where the task was created—you do not need to mention a chat ID or channel name. If you want a task to send to additional chats or recipients, say so explicitly in the instructions.
+- **Edit, pause, or inspect runs:** You can manage tasks right in chat—for example, *"Move my daily report from 9am to 10am"*, *"Pause my daily report"*, or *"Show the last five runs of my daily report"*—or use the WebUI **Automations** view.
 
-Scheduled automations normally deliver the result back to the session where they
-were created. Use them for work that should run on a predictable schedule and
-report each run.
+### Change the chat for a scheduled task
 
-For background checks that should stay quiet unless there is something useful to
-report, use heartbeat instead of a user-created scheduled automation.
+To move a scheduled task to a different chat:
+
+1. Open the task in WebUI **Automations**.
+2. Pick a new destination under **Run and reply in** (chat-app destinations appear once their channel is running and nanobot has received a message there).
+3. Review the task instructions—click **Edit instructions** if you need to update any hardcoded destination text.
+4. Click **Confirm change** (or **Save and change**).
+
+Future runs will use the new chat's history and reply there. Previous messages stay in the original chat. Note that members of the new chat will see future results, and moving a task does not isolate workspace files or shared memory.
 
 ## Local Triggers
 
-Local triggers let a local script or external service send a message into a
-specific nanobot session later.
+Local triggers let a shell script, CI job, or external webhook wake nanobot inside a specific chat.
 
-Create the trigger from the chat or WebUI topic where future messages should
-arrive:
+1. In the target chat or WebUI topic, create a trigger:
 
 ```text
 /trigger PR review
 ```
 
-nanobot replies with a trigger ID and a command shaped like:
+2. nanobot replies with a trigger ID and ready-to-use command:
 
 ```bash
 nanobot trigger trg_8K4P2Q9X "Review PR #4502"
 ```
 
-Replace the quoted text with the message nanobot should receive. For generated
-or longer content, pipe stdin:
+3. Run that command whenever an event happens, or pipe longer output through stdin:
 
 ```bash
 generate-report | nanobot trigger trg_8K4P2Q9X
 ```
 
-For multiple instances, use the same config or workspace selector as the
-gateway:
+If you run multiple nanobot instances, pass the same `--config` or `--workspace` (your configured agent workspace) used by that gateway:
 
 ```bash
-nanobot trigger --config ./bot-a/config.json trg_8K4P2Q9X "Nightly report"
 nanobot trigger --workspace ./bot-a/workspace trg_8K4P2Q9X "Nightly report"
 ```
 
-nanobot does not provide a built-in public webhook receiver for local triggers.
-If GitHub, CI, or another external system should wake nanobot, run your own
-small webhook service and have it call `nanobot trigger` after it builds the
-final message.
+> [!NOTE]
+> nanobot does not expose a public webhook server for local triggers. To connect GitHub, CI, or another external service, have your own small webhook receiver call `nanobot trigger`.
 
 ## Heartbeat
 
-Heartbeat is for recurring workspace checks that should usually stay quiet. It
-reads `<workspace>/HEARTBEAT.md`, executes active tasks, and sends only useful or
-actionable results to the most recently active chat target.
+Use **Heartbeat** for recurring checks that should stay silent unless something needs your attention—for example, watching a repo for failures or scanning an inbox for urgent messages. (Use a scheduled automation instead when you want a reminder at a specific time every day.)
 
-Use heartbeat for checks such as "watch this repo for important failures" or
-"periodically inspect this workspace and only tell me when action is needed." Use
-a scheduled automation instead when every run should produce a visible reminder
-or report.
+Edit `~/.nanobot/workspace/HEARTBEAT.md` (or ask nanobot to add a periodic check):
 
-Heartbeat is enabled by default when `nanobot gateway` starts. Configure it in
-[`configuration.md#gateway-heartbeat`](./configuration.md#gateway-heartbeat).
+```markdown
+## Active Tasks
 
-## Manage Automations
+- Check weather forecast and notify me only if storms are expected
+- Scan inbox for urgent emails and notify me if any are found
+```
 
-Use the WebUI Automations view to:
+Heartbeat is enabled by default while `nanobot gateway` is running and sends actionable results to your most recently active chat. Configure its interval or disable it in [`configuration.md#gateway-heartbeat`](./configuration.md#gateway-heartbeat).
 
-- filter by all, active, paused, needs-attention, or system jobs;
-- search by task name, message, trigger command, linked topic, schedule, or
-  status;
-- sort by next run, last run, updated time, or name;
-- run scheduled automations now;
-- pause or resume, rename, or delete user-created automations;
-- copy the CLI command for local triggers;
-- inspect protected system automations without changing them.
+## Manage Automations in WebUI
 
-Local triggers do not have a WebUI "Run now" action because each run needs a
-message. Copy the `nanobot trigger ...` command from the WebUI and replace
-`"message"` with the content that should be delivered.
+Open **Automations** in the WebUI to:
+
+- Filter by all, active, paused, needs-attention, or system jobs.
+- Search by name, instructions, chat, schedule, or status (e.g. `chat:WeChat`, `status:paused`).
+- Run a scheduled automation immediately, pause/resume it, rename it, or delete it.
+- Copy the `nanobot trigger ...` command for a local trigger.
+
+Protected system jobs (such as Heartbeat and Dream) appear as read-only.
 
 ## Delivery and Reliability
 
-Automation delivery is workspace-local. Scheduled jobs and local trigger
-deliveries use the same workspace as the gateway.
+Keep these behaviors in mind when relying on automations:
 
-Local trigger messages are written to a durable queue. If the gateway is not
-running yet, the message waits in that workspace. If the linked topic is
-already running a turn, the trigger waits until the session becomes idle instead
-of being injected into the active turn.
-
-The local trigger queue is at-least-once, not exactly-once. If the gateway exits
-after claiming a delivery but before the linked turn completes, the next gateway
-start requeues that delivery. External scripts should make repeated trigger
-messages safe. If the delivery reaches the agent and the turn fails, the
-delivery is marked failed instead of retrying forever.
-
-Each local trigger delivery writes an audit record under
-`<workspace>/triggers/runs`. Run one gateway consumer per workspace; the local
-queue is not a distributed multi-consumer queue.
-
-## Common Patterns
-
-For a nightly report, ask from the target topic:
-
-```text
-Every night at 9pm, review today's workspace changes and summarize anything I should handle tomorrow.
-```
-
-For a CI follow-up, create a trigger once:
-
-```text
-/trigger CI follow-up
-```
-
-Then have your CI or webhook adapter call:
-
-```bash
-nanobot trigger <trigger-id> "Build failed on main. Inspect the logs and suggest the next fix."
-```
-
-For a local report script:
-
-```bash
-generate-report | nanobot trigger <trigger-id>
-```
+- **Missed schedules after downtime:** If the gateway was stopped during a scheduled time, nanobot does **not** replay missed runs when it restarts. Recurring schedules simply wait for their next future run; one-time tasks in the past will not run automatically.
+- **Exact clock times:** Use a cron expression (not an interval) when exact wall-clock timing matters, since intervals recalculate after a run finishes.
+- **Retry on channel failure:** If a chat app is temporarily unreachable before a scheduled reply is sent, the gateway automatically retries for up to one hour (without re-running the model). If a send times out mid-flight, nanobot will not auto-retry to avoid duplicate messages—check the destination first.
+- **Local triggers:** Trigger messages wait in a durable workspace queue if the gateway is offline or if the target chat is busy. Delivery is **at-least-once** (a restart mid-run can replay a trigger), so external scripts should tolerate duplicate messages safely.
 
 ## Troubleshooting
 
-If an automation does not run, check that `nanobot gateway` is running, the
-automation is enabled, and it was created from a linked topic.
-
-If a local trigger waits forever, confirm the command uses the same workspace or
-config as the gateway.
-
-If a trigger message appears twice after a restart, treat it as expected
-at-least-once delivery and make the external message idempotent.
-
-If you need to edit, pause, resume, rename, delete, or inspect automations, use
-the WebUI Automations view.
+- **Automation never runs:** Confirm `nanobot gateway` is running, the automation is enabled, and it is linked to a chat.
+- **Local trigger sits waiting:** Make sure `nanobot trigger` uses the same `--config` or `--workspace` as the running gateway.
+- **Scheduled message did not arrive:** Check the task's run history in **Automations** and `nanobot gateway logs` for channel errors.
 
 ## Related Docs
 
-- [`webui.md#automations`](./webui.md#automations) for the browser management view
-- [`chat-commands.md#local-triggers`](./chat-commands.md#local-triggers) for `/trigger`
-- [`cli-reference.md#local-triggers`](./cli-reference.md#local-triggers) for `nanobot trigger`
-- [`configuration.md#gateway-heartbeat`](./configuration.md#gateway-heartbeat) for heartbeat settings
-- [`guides/long-running-ai-agent.md`](./guides/long-running-ai-agent.md) for long-running agent work
+- [WebUI Automations](./webui.md#automations)
+- [In-Chat Commands: Local Triggers](./chat-commands.md#local-triggers)
+- [CLI Reference: Local Triggers](./cli-reference.md#local-triggers)
+- [Configuration: Heartbeat](./configuration.md#gateway-heartbeat)
+- [Long-Running AI Agent Guide](./guides/long-running-ai-agent.md)

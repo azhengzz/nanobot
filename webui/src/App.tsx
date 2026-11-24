@@ -6,20 +6,42 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
 } from "react";
-import { ArrowRight, ChevronDown, Eye, EyeOff, Moon, ShieldCheck, Sun, X } from "lucide-react";
+import { ArrowRight, CircleHelp, Eye, EyeOff, Loader2 } from "lucide-react";
+import { ThemeToggleIcon } from "@/components/icons/ThemeToggleIcon";
 import { Trans, useTranslation } from "react-i18next";
-import { channelUiPresentation } from "@/channel-plugins/registry";
+import { ChannelPairing } from "@/components/pairing/ChannelPairing";
+import { StarPrompt } from "@/components/StarPrompt";
 import { Sidebar } from "@/components/Sidebar";
+import { RemoteInstances } from "@/components/remote/RemoteInstances";
+import { useRemoteConnections } from "@/components/remote/remote-context";
+import { LazyRemoteConnectionsPage } from "@/components/remote/LazyRemoteConnectionsPage";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { SidebarResizeHandle, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from "@/components/SidebarResizeHandle";
 import { matchSidebarShortcut } from "@/lib/sidebar-shortcuts";
+import { invalidateToolsCatalog } from "@/lib/tools-catalog-cache";
 import type { SidebarDeleteItem } from "@/components/ChatList";
 import type { SettingsSectionKey } from "@/components/settings/SettingsView";
+import { StartupShell } from "@/components/StartupShell";
+import { ComposerDraftStore } from "@/lib/composer-draft";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
-import type { SettingsExitGuard } from "@/components/settings/contracts";
+import { isAppsSection, type SettingsExitGuard, type SettingsFocusTarget } from "@/components/settings/contracts";
+import {
+  RESTART_ROUTE_KEY,
+  RESTART_STARTED_KEY,
+  changesSettingsSurface,
+  defaultShellRoute,
+  readShellRoute,
+  rememberRestartRoute,
+  shellViewForSettingsSection,
+  writeShellRoute,
+  type ShellRoute,
+  type ShellView,
+} from "@/shell-route";
 import { PaneWorkbench } from "@/components/workbench/PaneWorkbench";
+import { transitionSession } from "@/components/thread/session-transition";
 import {
   MAX_WORKBENCH_PANES,
   addWorkbenchPane,
@@ -37,100 +59,64 @@ import {
   workbenchTabForPane,
   type WorkbenchState,
 } from "@/components/workbench/workbench-model";
-import { floatingSurfaceElevationClassName } from "@/components/ui/floating-surface";
+import { ToastProvider, useToast, type ToastNotice } from "@/components/ui/toast";
+import {
+  AutomationDeleteToastDetails,
+  type AutomationDeleteSessionGroup,
+} from "@/components/AutomationDeleteToastDetails";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 
+import { useLocalGateway } from "@/hooks/useLocalGateway";
 import { useSessions } from "@/hooks/useSessions";
+import { useReconnectRuns } from "@/hooks/useReconnectRuns";
 import { useDeferredTitleRefresh } from "@/hooks/useDeferredTitleRefresh";
 import { useSidebarState } from "@/hooks/useSidebarState";
 import { useSkills } from "@/hooks/useSkills";
-import { useLogoFallback } from "@/hooks/useLogoFallback";
-import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { useAppViewport } from "@/hooks/useAppViewport";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
 import { ThemeProvider, useTheme } from "@/hooks/useTheme";
-import { logoFallbackUrls } from "@/lib/provider-brand";
+import { useReadingTypography } from "@/hooks/useReadingTypography";
 import { cn } from "@/lib/utils";
-import {
-  BootstrapAuthRequiredError,
-  clearSavedSecret,
-  consumeUrlBootstrapSecret,
-  deriveWsUrl,
-  fetchBootstrap,
-  loadSavedSecret,
-  saveSecret,
-} from "@/lib/bootstrap";
 import { displayTitle, sortSessions } from "@/lib/chat-groups";
 import { deriveTitle } from "@/lib/format";
-import { NanobotClient } from "@/lib/nanobot-client";
+import { BrowserNotifications, useBrowserNotificationLifecycle } from "@/components/BrowserNotifications";
+import { ThreadMessageCache } from "@/lib/thread-message-cache";
+import { FilePreviewStore } from "@/hooks/useFilePreviewState";
 import { ClientProvider, useClient } from "@/providers/ClientProvider";
+import { BackgroundProvider } from "@/providers/BackgroundProvider";
+import { useVersionCheck } from "@/providers/VersionCheckProvider";
+import { useUpdateFlow } from "@/providers/UpdateFlowProvider";
 import type {
-  BootstrapResponse,
   ChatSummary,
   RuntimeSurface,
-  PairingRequestInfo,
   SessionAutomationJob,
   SettingsPayload,
+  SidebarStatePayload,
   WorkspaceScopePayload,
   WorkspacesPayload,
 } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Disclosure } from "@/components/ui/disclosure";
-import {
-  fetchPairingRequests,
-  fetchSettings,
-  fetchWorkspaces,
-  runPairingAction,
-} from "@/lib/api";
-import {
-  createRuntimeHost,
-  isNativeRuntime,
-  toRuntimeSurface,
-} from "@/lib/runtime";
+import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { HoverHint } from "@/components/ui/hover-hint";
+import { fetchSettings, fetchWorkspaces } from "@/lib/api";
+import { isNativeRuntime } from "@/lib/runtime";
 import { projectNameFromPath, scopeWithAccessMode } from "@/lib/workspace";
 import {
   createTemporaryChatSession,
   deriveTemporaryChatTitle,
 } from "@/lib/temporary-chat";
 
-type BootState =
-  | { status: "loading" }
-  | { status: "error"; message: string }
-  | { status: "auth"; failed?: boolean }
-  | {
-      status: "ready";
-      client: NanobotClient;
-      token: string;
-      tokenExpiresAt: number | null;
-      modelName: string | null;
-      ingressLimits: BootstrapResponse["limits"] | null;
-      runtimeSurface: RuntimeSurface;
-    };
-
 const SIDEBAR_STORAGE_KEY = "nanobot-webui.sidebar";
 const SESSION_UPDATES_STORAGE_KEY = "nanobot-webui.sidebar.session-updates.v1";
 const LEGACY_COMPLETED_RUNS_STORAGE_KEY = "nanobot-webui.sidebar.completed-runs.v1";
-const RESTART_STARTED_KEY = "nanobot-webui.restartStartedAt";
-const RESTART_ROUTE_KEY = "nanobot-webui.restartRoute";
-const RESTART_ROUTE_TTL_MS = 5 * 60 * 1000;
 const SIDEBAR_WIDTH = 272;
 const SIDEBAR_WIDTH_STORAGE_KEY = "nanobot-webui.sidebar.width";
 const SIDEBAR_RAIL_WIDTH = 56;
 const MOBILE_SIDEBAR_WIDTH = `min(${SIDEBAR_WIDTH}px, calc(100vw - 0.75rem))`;
-const TOKEN_REFRESH_MARGIN_MS = 30_000;
-const TOKEN_REFRESH_MIN_DELAY_MS = 5_000;
-const PAIRING_POLL_INTERVAL_MS = 5_000;
-const PAIRING_IDLE_POLL_INTERVAL_MS = 15_000;
-const PAIRING_DISMISS_SNOOZE_MS = 30_000;
-type ShellView = "chat" | "settings" | "apps" | "automations" | "skills" | "channels";
-type ShellRoute = {
-  view: ShellView;
-  activeKey: string | null;
-  settingsSection: SettingsSectionKey;
-  temporary?: boolean;
-};
-const ThreadShell = lazy(() => import("@/components/thread/ThreadShell").then(
+const loadThreadShell = () => import("@/components/thread/ThreadShell");
+const ThreadShell = lazy(() => loadThreadShell().then(
   (module) => ({ default: module.ThreadShell }),
 ));
 const loadSettingsView = () => import("@/components/settings/SettingsView");
@@ -142,238 +128,30 @@ const SessionSearchDialog = lazy(async () => {
   const module = await import("@/components/SessionSearchDialog");
   return { default: module.SessionSearchDialog };
 });
-const DeleteConfirm = lazy(async () => {
-  const module = await import("@/components/DeleteConfirm");
-  return { default: module.DeleteConfirm };
-});
-const RenameChatDialog = lazy(async () => {
-  const module = await import("@/components/RenameChatDialog");
-  return { default: module.RenameChatDialog };
+const RenameDialog = lazy(async () => {
+  const module = await import("@/components/RenameDialog");
+  return { default: module.RenameDialog };
 });
 
-function SurfaceLoadingFallback({ label }: { label?: string }) {
-  const { t } = useTranslation();
-  return (
-    <div
-      aria-busy="true"
-      className="flex h-full w-full flex-col gap-5 px-5 py-8 sm:px-8 lg:px-12"
-    >
-      <span className="sr-only">{label ?? t("settings.status.loading")}</span>
-      <div className="h-4 w-20 animate-pulse rounded bg-muted/70 motion-reduce:animate-none" />
-      <div className="h-9 w-48 animate-pulse rounded bg-muted/70 motion-reduce:animate-none" />
-      <div className="mt-4 h-12 w-full max-w-3xl animate-pulse rounded-md bg-muted/55 motion-reduce:animate-none" />
-      <div className="h-28 w-full max-w-3xl animate-pulse rounded-md bg-muted/40 motion-reduce:animate-none" />
-    </div>
-  );
-}
-
-const SETTINGS_SECTION_KEYS: SettingsSectionKey[] = [
-  "capabilities",
-  "overview",
-  "about",
-  "appearance",
-  "models",
-  "image",
-  "voice",
-  "browser",
-  "channels",
-  "apps",
-  "automations",
-  "memory",
-  "skills",
-  "runtime",
-  "advanced",
-];
-
-function isSettingsSectionKey(value: string | null): value is SettingsSectionKey {
-  return SETTINGS_SECTION_KEYS.includes(value as SettingsSectionKey);
-}
-
-function defaultShellRoute(): ShellRoute {
-  return { view: "chat", activeKey: null, settingsSection: "overview" };
-}
-
-function shellViewForSettingsSection(section: SettingsSectionKey): ShellView {
-  if (section === "apps" || section === "automations" || section === "skills" || section === "channels") return section;
-  return "settings";
-}
-
-function fallbackRestartHash(hash: string): boolean {
-  return !hash || hash === "/" || hash === "/new";
-}
-
-function rememberRestartRoute(): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(RESTART_ROUTE_KEY, window.location.hash || "#/new");
-  } catch {
-    // ignore storage errors
-  }
-}
-
-function maybeRestoreRestartHash(hash: string): string {
-  if (typeof window === "undefined" || !fallbackRestartHash(hash)) return hash;
-  try {
-    const startedAt = Number(window.localStorage.getItem(RESTART_STARTED_KEY) ?? "0");
-    const storedHash = window.localStorage.getItem(RESTART_ROUTE_KEY);
-    if (!startedAt || !storedHash || Date.now() - startedAt > RESTART_ROUTE_TTL_MS) {
-      window.localStorage.removeItem(RESTART_ROUTE_KEY);
-      return hash;
-    }
-    window.localStorage.removeItem(RESTART_ROUTE_KEY);
-    const nextHash = storedHash.startsWith("#") ? storedHash : `#${storedHash}`;
-    window.history.replaceState(
-      null,
-      "",
-      `${window.location.pathname}${window.location.search}${nextHash}`,
-    );
-    return nextHash.slice(1);
-  } catch {
-    return hash;
-  }
-}
-
-function readShellRoute(): ShellRoute {
-  if (typeof window === "undefined") return defaultShellRoute();
-  const currentHash = window.location.hash.startsWith("#")
-    ? window.location.hash.slice(1)
-    : window.location.hash;
-  const hash = maybeRestoreRestartHash(currentHash);
-  if (!hash || hash === "/" || hash === "/new") return defaultShellRoute();
-
-  const [path, query = ""] = hash.split("?", 2);
-  const params = new URLSearchParams(query);
-  const rawSettingsSection = params.get("section");
-  const settingsSection = isSettingsSectionKey(rawSettingsSection)
-    ? rawSettingsSection
-    : "overview";
-  const activeKey = params.get("chat")?.trim() || null;
-
-  if (path === "/settings") {
-    return {
-      view: shellViewForSettingsSection(settingsSection),
-      activeKey,
-      settingsSection,
-    };
-  }
-  if (path === "/apps") {
-    return { view: "apps", activeKey, settingsSection: "apps" };
-  }
-  if (path === "/automations") {
-    return { view: "automations", activeKey, settingsSection: "automations" };
-  }
-  if (path === "/channels") {
-    return { view: "channels", activeKey, settingsSection: "channels" };
-  }
-  if (path === "/skills") {
-    return { view: "skills", activeKey, settingsSection: "skills" };
-  }
-  if (path.startsWith("/temporary/")) {
-    const encoded = path.slice("/temporary/".length);
-    try {
-      const chatId = decodeURIComponent(encoded).trim();
-      return chatId
-        ? {
-            view: "chat",
-            activeKey: `websocket:${chatId}`,
-            settingsSection: "overview",
-            temporary: true,
-          }
-        : defaultShellRoute();
-    } catch {
-      return defaultShellRoute();
-    }
-  }
-  if (path.startsWith("/chat/")) {
-    const encoded = path.slice("/chat/".length);
-    try {
-      const key = decodeURIComponent(encoded).trim();
-      return key
-        ? { view: "chat", activeKey: key, settingsSection: "overview" }
-        : defaultShellRoute();
-    } catch {
-      return defaultShellRoute();
-    }
-  }
-  return defaultShellRoute();
-}
-
-function shellRouteHash(route: ShellRoute): string {
-  if (route.view === "chat") {
-    if (route.temporary && route.activeKey?.startsWith("websocket:")) {
-      const chatId = route.activeKey.slice("websocket:".length);
-      return `#/temporary/${encodeURIComponent(chatId)}`;
-    }
-    return route.activeKey
-      ? `#/chat/${encodeURIComponent(route.activeKey)}`
-      : "#/new";
-  }
-  const params = new URLSearchParams();
-  if (route.activeKey) params.set("chat", route.activeKey);
-  if (route.view === "settings" && route.settingsSection !== "overview") {
-    params.set("section", route.settingsSection);
-  }
-  const query = params.toString();
-  return `#/${route.view}${query ? `?${query}` : ""}`;
-}
-
-function writeShellRoute(route: ShellRoute, replace = false): void {
-  if (typeof window === "undefined") return;
-  const nextHash = shellRouteHash(route);
-  if (window.location.hash === nextHash) return;
-  if (replace) {
-    window.history.replaceState(
-      null,
-      "",
-      `${window.location.pathname}${window.location.search}${nextHash}`,
-    );
-    return;
-  }
-  window.history.pushState(
-    null,
-    "",
-    `${window.location.pathname}${window.location.search}${nextHash}`,
-  );
-}
-
-function bootstrapTokenExpiresAt(expiresInSeconds: number): number {
-  return Date.now() + Math.max(0, expiresInSeconds) * 1000;
-}
-
-function tokenRefreshDelayMs(expiresAt: number): number {
-  const remaining = Math.max(0, expiresAt - Date.now());
-  const margin = Math.min(
-    TOKEN_REFRESH_MARGIN_MS,
-    Math.max(1_000, remaining / 2),
-  );
-  return Math.max(TOKEN_REFRESH_MIN_DELAY_MS, remaining - margin);
-}
-
-function AuthForm({
-  failed,
-  onSecret,
-}: {
-  failed: boolean;
-  onSecret: (secret: string) => void;
+function AuthForm({ onSecret }: {
+  onSecret: (secret: string, onAuthRejected: () => void) => void;
 }) {
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState("");
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [validationError, setValidationError] = useState<"required" | "invalid" | null>(
-    failed ? "invalid" : null,
-  );
-  const errorMessage = validationError ? t(`app.auth.${validationError}`) : null;
-
-  useEffect(() => {
-    if (!validationError) return;
-    const timeout = window.setTimeout(() => setValidationError(null), 3_000);
-    return () => window.clearTimeout(timeout);
-  }, [validationError]);
+  const [validationError, setValidationError] = useState<"required" | "invalid" | null>(null);
+  const helpTitle = t("app.auth.helpTitle");
+  const passwordLabel = t("app.auth.label");
+  const requiredMessage = t("app.auth.required");
+  const invalidMessage = t("app.auth.invalid");
+  const errorMessage = validationError === "required" ? requiredMessage
+    : validationError === "invalid" ? invalidMessage : null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting) return;
     const secret = value.trim();
     if (!secret) {
       setValue("");
@@ -382,54 +160,91 @@ function AuthForm({
       return;
     }
     setSubmitting(true);
-    onSecret(secret);
+    onSecret(secret, () => {
+      setValue("");
+      setPasswordVisible(false);
+      setSubmitting(false);
+      setValidationError("invalid");
+      inputRef.current?.focus();
+    });
   };
 
   return (
     <main className="flex h-full w-full flex-col overflow-y-auto bg-background">
-      <div className="mx-5 mt-5 shrink-0 self-end sm:mx-8">
+      <div className="mx-5 mt-3.5 flex shrink-0 items-center gap-2 self-end sm:mx-8">
         <LanguageSwitcher className="h-8 min-w-0 gap-2 px-3 text-xs" />
+        <Dialog>
+          <HoverHint content={helpTitle} side="bottom" align="end">
+            <DialogTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={helpTitle}
+                className="h-11 w-11 rounded-full text-muted-foreground"
+              >
+                <CircleHelp className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden />
+              </Button>
+            </DialogTrigger>
+          </HoverHint>
+          <DialogContent className="max-w-md gap-5">
+            <DialogTitle className="pe-8 leading-snug">{helpTitle}</DialogTitle>
+            <div className="min-w-0 space-y-4 text-sm leading-6 text-muted-foreground">
+              <div>
+                <DialogDescription className="leading-6">{t("app.auth.helpConfig")}</DialogDescription>
+                <code className="mt-2 block rounded-compact bg-muted px-3 py-2 font-mono text-xs leading-5 text-foreground [overflow-wrap:anywhere]">
+                  ~/.nanobot/config.json
+                </code>
+              </div>
+              <div>
+                <p>{t("app.auth.helpSecret")}</p>
+                <code className="mt-2 block rounded-compact bg-muted px-3 py-2 font-mono text-xs leading-5 text-foreground [overflow-wrap:anywhere]">
+                  channels.websocket.tokenIssueSecret
+                </code>
+              </div>
+              <p>
+                <Trans
+                  i18nKey="app.auth.helpFallback"
+                  components={{ code: <code className="font-mono text-xs text-foreground [overflow-wrap:anywhere]" /> }}
+                />
+              </p>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
-      <div className="flex flex-1 shrink-0 items-center justify-center px-6 pb-20 pt-8">
+      <div className="flex flex-1 shrink-0 items-center justify-center px-4 pb-14 pt-6 sm:px-6 sm:pb-20">
         <section
           aria-labelledby="webui-auth-title"
-          className="w-full max-w-xs"
+          className="w-full max-w-[27rem] rounded-modal border border-border/70 bg-muted/55 px-6 pb-6 pt-12 [background-image:radial-gradient(ellipse_at_50%_0%,hsl(var(--usage-token)/0.18),transparent_66%)] sm:px-12 sm:pb-8 sm:pt-14"
         >
           <div className="text-center">
-            <img
-              src="/brand/nanobot_mark.svg"
-              alt=""
-              width={56}
-              height={56}
-              draggable={false}
-              className="mx-auto mb-5 h-14 w-14 select-none"
-            />
-            <h1 id="webui-auth-title" className="text-balance text-2xl font-semibold tracking-tight text-foreground sm:text-[1.75rem]">
+            <div className="mx-auto mb-7 grid h-24 w-24 place-items-center rounded-full bg-gradient-to-b from-card to-card/35 shadow-[0_16px_28px_hsl(var(--foreground)/0.10)] dark:shadow-[0_16px_28px_rgba(0,0,0,0.28)]">
+              <img src="/brand/nanobot_mark.svg" alt="" width={56} height={56}
+                draggable={false} className="h-14 w-14 select-none" />
+            </div>
+            <h1 id="webui-auth-title" className="text-balance text-2xl font-semibold tracking-tight text-foreground">
               {t("app.auth.title")}
             </h1>
           </div>
           <form onSubmit={handleSubmit} className="mt-8">
+            <label htmlFor="webui-access-password" className="sr-only">{passwordLabel}</label>
             <div className="relative">
               <Input
                 ref={inputRef}
                 id="webui-access-password"
                 name="webui-access-password"
-                aria-label={t("app.auth.label")}
                 type={passwordVisible ? "text" : "password"}
                 autoComplete="current-password"
+                placeholder={passwordLabel}
                 value={value}
                 onChange={(e) => {
                   setValue(e.target.value);
                   setValidationError(null);
                 }}
-                disabled={submitting}
+                readOnly={submitting}
                 aria-invalid={validationError ? true : undefined}
                 aria-describedby={validationError ? "webui-auth-error" : undefined}
-                placeholder={errorMessage ?? undefined}
-                className={cn(
-                  "h-12 rounded-full border-foreground/15 bg-muted/30 px-4 pr-24 text-base",
-                  validationError && "placeholder:text-[13px] placeholder:text-red-600 dark:placeholder:text-red-400",
-                )}
+                className="h-12 rounded-full border-border bg-background/85 ps-4 pe-14 text-base"
                 autoFocus
               />
               <Button
@@ -442,7 +257,7 @@ function AuthForm({
                 )}
                 aria-controls="webui-access-password"
                 onClick={() => setPasswordVisible((visible) => !visible)}
-                className="absolute right-12 top-1/2 h-10 w-10 -translate-y-1/2 rounded-full text-muted-foreground hover:text-foreground"
+                className="absolute end-0.5 top-1/2 h-11 w-11 -translate-y-1/2 rounded-full text-muted-foreground hover:text-foreground"
               >
                 {passwordVisible ? (
                   <EyeOff className="h-4 w-4" strokeWidth={1.75} aria-hidden />
@@ -450,50 +265,24 @@ function AuthForm({
                   <Eye className="h-4 w-4" strokeWidth={1.75} aria-hidden />
                 )}
               </Button>
-              <Button
-                type="submit"
-                variant="ghost"
-                size="icon"
-                disabled={submitting}
-                aria-label={t("app.auth.submit")}
-                title={t("app.auth.submit")}
-                className="absolute right-1 top-1/2 h-10 w-10 -translate-y-1/2 rounded-full"
-              >
-                <ArrowRight className="h-4 w-4" strokeWidth={1.75} aria-hidden />
-              </Button>
             </div>
-            {errorMessage ? (
-              <p id="webui-auth-error" role="alert" className="sr-only">
-                {errorMessage}
-              </p>
-            ) : null}
+            <div className="mt-2 grid px-4 text-[13px] leading-5 text-destructive">
+              <span aria-hidden="true" className="invisible col-start-1 row-start-1">{requiredMessage}</span>
+              <span aria-hidden="true" className="invisible col-start-1 row-start-1">{invalidMessage}</span>
+              {errorMessage ? (
+                <p id="webui-auth-error" role="alert" className="col-start-1 row-start-1">{errorMessage}</p>
+              ) : null}
+            </div>
+            <Button type="submit" size="lg" disabled={submitting} aria-busy={submitting || undefined}
+              className="relative mt-3 w-full rounded-full px-11">
+              {t("app.auth.submit")}
+              {submitting ? (
+                <Loader2 className="absolute end-4 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
+              ) : (
+                <ArrowRight className="absolute end-4 h-4 w-4 rtl:rotate-180" strokeWidth={1.75} aria-hidden />
+              )}
+            </Button>
           </form>
-          <Disclosure
-            className="mt-4"
-            summaryClassName="flex min-h-11 items-center justify-center gap-1.5 rounded-compact text-[13px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-            contentClassName="rounded-control bg-muted/50 p-4 text-sm leading-6 text-muted-foreground"
-            summary={(
-              <>
-                <span>{t("app.auth.helpTitle")}</span>
-                <ChevronDown className="h-3.5 w-3.5 shrink-0 transition-transform group-data-[state=open]/disclosure:rotate-180 motion-reduce:transition-none" strokeWidth={1.5} aria-hidden />
-              </>
-            )}
-          >
-            <p>{t("app.auth.helpConfig")}</p>
-            <code className="mt-2 block rounded-compact bg-background px-3 py-2 font-mono text-xs text-foreground [overflow-wrap:anywhere]">
-              ~/.nanobot/config.json
-            </code>
-            <p className="mt-4">{t("app.auth.helpSecret")}</p>
-            <code className="mt-2 block rounded-compact bg-background px-3 py-2 font-mono text-xs text-foreground [overflow-wrap:anywhere]">
-              channels.websocket.tokenIssueSecret
-            </code>
-            <p className="mt-3">
-              <Trans
-                i18nKey="app.auth.helpFallback"
-                components={{ code: <code className="font-mono text-xs text-foreground [overflow-wrap:anywhere]" /> }}
-              />
-            </p>
-          </Disclosure>
         </section>
       </div>
     </main>
@@ -556,12 +345,6 @@ function normalizeWorkspaceScope(scope: WorkspaceScopePayload): WorkspaceScopePa
   };
 }
 
-function isBootstrapAuthRequired(error: unknown): boolean {
-  if (error instanceof BootstrapAuthRequiredError) return true;
-  const msg = error instanceof Error ? error.message : String(error);
-  return msg.includes("HTTP 401") || msg.includes("HTTP 403");
-}
-
 function HostChrome({
   rightAction,
 }: {
@@ -578,438 +361,22 @@ function HostChrome({
   );
 }
 
-function PairingCodePopup({
-  requests,
-  total,
-  busyCode,
-  error,
-  onApprove,
-  onDismiss,
-}: {
-  requests: PairingRequestInfo[];
-  total: number;
-  busyCode: string | null;
-  error: string | null;
-  onApprove: (code: string) => void;
-  onDismiss: (code: string) => void;
-}) {
-  const { t } = useTranslation();
-  const [value, setValue] = useState("");
-  const normalizedCode = normalizePairingCode(value);
-  const matchedRequest = useMemo(
-    () => requests.find((request) => request.code === normalizedCode) ?? null,
-    [normalizedCode, requests],
-  );
-  const firstRequest = requests[0] ?? null;
-  const displayRequest = matchedRequest ?? firstRequest;
-  const expires = formatPairingExpiry(firstRequest?.expires_in_seconds);
-  const isCompleteCode = normalizedCode.length === 9;
-  const showNoMatch = isCompleteCode && !matchedRequest && !busyCode;
-
-  useEffect(() => {
-    if (!matchedRequest || busyCode) return;
-    onApprove(matchedRequest.code);
-  }, [busyCode, matchedRequest, onApprove]);
-
-  useEffect(() => {
-    if (!requests.length) setValue("");
-  }, [requests.length]);
-
-  if (!firstRequest) return null;
-
-  return (
-    <div
-      role="dialog"
-      aria-live="polite"
-      aria-label={t("app.pairing.title", { defaultValue: "Pair a chat user" })}
-      className={cn(
-        "fixed right-4 top-[calc(0.75rem+env(safe-area-inset-top))] z-[70]",
-        "w-[min(calc(100vw-2rem),24rem)] rounded-modal",
-        floatingSurfaceElevationClassName,
-        "p-4",
-        "animate-in fade-in-0 slide-in-from-top-2 duration-200",
-      )}
-    >
-      <div className="flex items-start gap-3">
-        <PairingChannelBadge channel={displayRequest.channel} />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-[15px] font-semibold tracking-[-0.01em]">
-                {t("app.pairing.title", { defaultValue: "Pair a chat user" })}
-              </p>
-              <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
-                {t("app.pairing.description", {
-                  defaultValue: "Enter the pairing code shown in the chat.",
-                })}
-              </p>
-            </div>
-            <button
-              type="button"
-              aria-label={t("common.close", { defaultValue: "Close" })}
-              onClick={() => onDismiss(firstRequest.code)}
-              className="rounded-full p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground"
-            >
-              <X className="h-4 w-4" aria-hidden />
-            </button>
-          </div>
-
-          <label className="mt-4 block text-[12.5px] font-medium text-foreground">
-            {t("app.pairing.code", { defaultValue: "Pairing code" })}
-          </label>
-          <PairingCodeSlots
-            value={value}
-            disabled={Boolean(busyCode)}
-            matched={Boolean(matchedRequest)}
-            invalid={showNoMatch}
-            ariaLabel={t("app.pairing.code", { defaultValue: "Pairing code" })}
-            onChange={(next) => setValue(formatPairingCodeInput(next))}
-          />
-
-          <div className="mt-3 flex items-center justify-between gap-3 text-[12.5px] text-muted-foreground">
-            <span>
-              {matchedRequest
-                ? t("app.pairing.matched", {
-                    defaultValue: "Matched {{channel}}. Connecting...",
-                    channel: channelLabel(matchedRequest.channel),
-                  })
-                : t("app.pairing.expiresInline", {
-                    defaultValue: "Code expires {{expires}}.",
-                    expires,
-                  })}
-            </span>
-            {total > 1 ? (
-              <span className="shrink-0">
-                {t("app.pairing.queueCount", {
-                  defaultValue: "{{count}} pending",
-                  count: total,
-                })}
-              </span>
-            ) : null}
-          </div>
-
-          {showNoMatch ? (
-            <p className="mt-2 text-[12px] leading-5 text-destructive">
-              {t("app.pairing.noMatch", {
-                defaultValue: "No pending request matches this code.",
-              })}
-            </p>
-          ) : null}
-
-          {error ? (
-            <p className="mt-2 text-[12px] leading-5 text-destructive">{error}</p>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function PairingChannelBadge({ channel }: { channel: string }) {
-  const presentation = pairingChannelPresentation(channel);
-  const initials = presentation.initials;
-  const color = presentation.color;
-  const logoUrls = useMemo(
-    () => logoFallbackUrls(presentation?.logoUrl),
-    [presentation?.logoUrl],
-  );
-  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
-
-  return (
-    <div
-      className="mt-0.5 grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-2xl border bg-background shadow-sm"
-      style={{
-        borderColor: `${color}30`,
-        boxShadow: `inset 0 0 0 1px ${color}14, 0 1px 2px rgba(15,23,42,0.06)`,
-      }}
-      aria-hidden
-    >
-      {logoUrl ? (
-        <img
-          src={logoUrl}
-          alt=""
-          decoding="async"
-          loading="lazy"
-          className="h-6 w-6 object-contain"
-          onLoad={onLogoLoad}
-          onError={onLogoError}
-        />
-      ) : presentation ? (
-        <span className="text-[11px] font-bold tracking-[-0.02em]" style={{ color }}>
-          {initials}
-        </span>
-      ) : (
-        <ShieldCheck className="h-5 w-5" style={{ color }} />
-      )}
-    </div>
-  );
-}
-
-function PairingCodeSlots({
-  value,
-  disabled,
-  matched,
-  invalid,
-  ariaLabel,
-  onChange,
-}: {
-  value: string;
-  disabled: boolean;
-  matched: boolean;
-  invalid: boolean;
-  ariaLabel: string;
-  onChange: (value: string) => void;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [focused, setFocused] = useState(false);
-  const compact = compactPairingCode(value);
-  const activeIndex = Math.min(compact.length, 7);
-  const slots = Array.from({ length: 8 }, (_, index) => compact[index] ?? "");
-  const renderSlot = (char: string, index: number) => {
-    const highlighted = focused && index === activeIndex && !matched && !invalid;
-    return (
-      <div
-        key={index}
-        className={cn(
-          "grid h-10 w-7 place-items-center rounded-xl border",
-          "bg-background/80 font-mono text-[16px] font-semibold uppercase",
-          "text-foreground shadow-[0_1px_1px_rgba(15,23,42,0.04)] transition",
-          matched
-            ? "border-emerald-500/45 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-            : invalid
-              ? "border-destructive/55 bg-destructive/5 text-destructive"
-              : highlighted
-                ? "border-foreground/30 bg-background text-foreground"
-                : char
-                  ? "border-border/80 bg-background text-foreground"
-                  : "border-border/55 bg-muted/35 text-muted-foreground",
-        )}
-      >
-        {char || " "}
-      </div>
-    );
-  };
-
-  return (
-    <div
-      className={cn(
-        "relative mt-2 rounded-2xl border border-transparent p-1",
-        "transition duration-150",
-        focused && !disabled ? "border-ring/20 bg-muted/35" : "bg-transparent",
-      )}
-      onClick={() => inputRef.current?.focus()}
-    >
-      <input
-        ref={inputRef}
-        value={value}
-        aria-label={ariaLabel}
-        inputMode="text"
-        autoCapitalize="characters"
-        autoComplete="off"
-        autoCorrect="off"
-        spellCheck={false}
-        maxLength={9}
-        disabled={disabled}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
-        onChange={(event) => onChange(event.target.value)}
-        className="absolute inset-0 z-10 h-full w-full cursor-text opacity-0 disabled:cursor-default"
-      />
-      <div className="pointer-events-none flex items-center gap-1.5">
-        {slots.slice(0, 4).map((char, index) => renderSlot(char, index))}
-        <div className="mx-0.5 h-px w-2.5 rounded-full bg-muted-foreground/35" />
-        {slots.slice(4).map((char, index) => renderSlot(char, index + 4))}
-      </div>
-    </div>
-  );
-}
-
-function compactPairingCode(raw: string): string {
-  return raw.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8).toUpperCase();
-}
-
-function formatPairingCodeInput(raw: string): string {
-  const compact = compactPairingCode(raw);
-  if (compact.length <= 4) return compact;
-  return `${compact.slice(0, 4)}-${compact.slice(4)}`;
-}
-
-function normalizePairingCode(raw: string): string {
-  return formatPairingCodeInput(raw);
-}
-
-function pairingChannelKey(channel: string): string {
-  const raw = channel.trim().toLowerCase();
-  if (!raw) return "";
-  return raw.split(/[.:]/)[0] ?? raw;
-}
-
-function channelLabel(channel: string): string {
-  return pairingChannelPresentation(channel).label;
-}
-
-function pairingChannelPresentation(channel: string) {
-  const key = pairingChannelKey(channel);
-  const plugin = channelUiPresentation(key);
-  return {
-    label: plugin?.displayName ?? channel,
-    initials: plugin?.initials ?? channel.slice(0, 2).toUpperCase(),
-    color: plugin?.color ?? "#10B981",
-    logoUrl: plugin?.logoUrl,
-  };
-}
-
-function formatPairingExpiry(seconds: number | null | undefined): string {
-  if (seconds == null) return "soon";
-  if (seconds <= 0) return "expired";
-  if (seconds < 60) return `${seconds}s`;
-  return `${Math.ceil(seconds / 60)} min`;
-}
-
-function resolveRuntimeSurface(
-  surface: RuntimeSurface | null | undefined,
-  fallback: RuntimeSurface,
-): RuntimeSurface {
-  if (isNativeRuntime(surface)) return "native";
-  return surface ? toRuntimeSurface(surface) : fallback;
+function prefetchChat() {
+  if (readShellRoute().view === "chat") void loadThreadShell().catch(() => {});
 }
 
 export default function App() {
+  useAppViewport();
+  useBrowserNotificationLifecycle();
+  useReadingTypography();
   const { t } = useTranslation();
-  const [state, setState] = useState<BootState>({ status: "loading" });
-  const bootstrapSecretRef = useRef("");
-
-  const refreshReadyClient = useCallback(
-    async (client: NanobotClient, fallbackSurface: RuntimeSurface) => {
-      const boot = await fetchBootstrap("", bootstrapSecretRef.current);
-      const url = deriveWsUrl(boot.ws_path, boot.token, boot.ws_url);
-      const runtimeSurface = resolveRuntimeSurface(boot.runtime_surface, fallbackSurface);
-      const runtimeHost = createRuntimeHost(runtimeSurface, boot.runtime_capabilities);
-      const tokenExpiresAt = boot.expires_in
-        ? bootstrapTokenExpiresAt(boot.expires_in)
-        : null;
-      if (runtimeHost.socketFactory) {
-        client.updateUrl(url, runtimeHost.socketFactory);
-      } else {
-        client.updateUrl(url);
-      }
-      client.updateMaxFrameBytes(boot.limits?.transport.max_frame_bytes);
-      setState((current) =>
-        current.status === "ready" && current.client === client
-          ? {
-              ...current,
-              token: boot.api_token ?? "",
-              tokenExpiresAt,
-              modelName: boot.model_name ?? current.modelName,
-              ingressLimits: boot.limits ?? current.ingressLimits,
-              runtimeSurface,
-            }
-          : current,
-      );
-      return { token: boot.api_token ?? "", url };
-    },
-    [],
-  );
-
-  const bootstrapWithSecret = useCallback(
-    (secret: string) => {
-      let cancelled = false;
-      (async () => {
-        setState({ status: "loading" });
-        try {
-          const boot = await fetchBootstrap("", secret);
-          if (cancelled) return;
-          if (secret) saveSecret(secret);
-          const url = deriveWsUrl(boot.ws_path, boot.token, boot.ws_url);
-          const runtimeSurface = resolveRuntimeSurface(boot.runtime_surface, "browser");
-          const runtimeHost = createRuntimeHost(runtimeSurface, boot.runtime_capabilities);
-          const client = new NanobotClient({
-            url,
-            maxFrameBytes: boot.limits?.transport.max_frame_bytes,
-            socketFactory: runtimeHost.socketFactory,
-            onReauth: async () => {
-              try {
-                const refreshed = await refreshReadyClient(client, runtimeSurface);
-                return refreshed.url;
-              } catch {
-                return null;
-              }
-            },
-          });
-          bootstrapSecretRef.current = secret;
-          client.connect();
-          setState({
-            status: "ready",
-            client,
-            token: boot.api_token ?? "",
-            tokenExpiresAt: boot.expires_in
-              ? bootstrapTokenExpiresAt(boot.expires_in)
-              : null,
-            modelName: boot.model_name ?? null,
-            ingressLimits: boot.limits ?? null,
-            runtimeSurface,
-          });
-        } catch (e) {
-          if (cancelled) return;
-          if (isBootstrapAuthRequired(e)) {
-            setState({ status: "auth", failed: !!secret });
-          } else {
-            setState({
-              status: "error",
-              message: e instanceof Error ? e.message : String(e),
-            });
-          }
-        }
-      })();
-      return () => {
-        cancelled = true;
-      };
-    },
-    [refreshReadyClient],
-  );
-
-  useEffect(() => {
-    if (state.status !== "ready" || state.tokenExpiresAt === null) return;
-    const client = state.client;
-    const timer = window.setTimeout(async () => {
-      try {
-        await refreshReadyClient(client, state.runtimeSurface);
-      } catch (e) {
-        if (isBootstrapAuthRequired(e)) {
-          setState({ status: "auth", failed: !!bootstrapSecretRef.current });
-        }
-      }
-    }, tokenRefreshDelayMs(state.tokenExpiresAt));
-    return () => window.clearTimeout(timer);
-  }, [refreshReadyClient, state]);
-
-  useEffect(() => {
-    const saved = consumeUrlBootstrapSecret() || loadSavedSecret();
-    return bootstrapWithSecret(saved);
-  }, [bootstrapWithSecret]);
+  const { state, bootstrapWithSecret, changeModelName, logout, restartEngine } = useLocalGateway(prefetchChat);
 
   if (state.status === "loading") {
-    return (
-      <div className="flex h-full w-full items-center justify-center">
-        <div className="flex flex-col items-center gap-3 animate-in fade-in-0 duration-300">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-foreground/40" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-foreground/60" />
-            </span>
-            {t("app.loading.connecting")}
-          </div>
-        </div>
-      </div>
-    );
+    return <StartupShell />;
   }
   if (state.status === "auth") {
-    return (
-      <AuthForm
-        failed={!!state.failed}
-        onSecret={(s) => bootstrapWithSecret(s)}
-      />
-    );
+    return <AuthForm onSecret={bootstrapWithSecret} />;
   }
   if (state.status === "error") {
     return (
@@ -1025,60 +392,37 @@ export default function App() {
     );
   }
 
-  const handleModelNameChange = (modelName: string | null) => {
-    setState((current) =>
-      current.status === "ready" ? { ...current, modelName } : current,
-    );
-  };
-
-  const handleLogout = () => {
-    if (state.status === "ready") {
-      state.client.close();
-    }
-    clearSavedSecret();
-    setState({ status: "auth" });
-  };
-
-  const handleNativeEngineRestart = async (): Promise<string> => {
-    const runtimeHost = createRuntimeHost(state.runtimeSurface);
-    if (!runtimeHost.restartEngine) {
-      throw new Error("native engine restart is unavailable");
-    }
-    rememberRestartRoute();
-    try {
-      window.localStorage.setItem(RESTART_STARTED_KEY, String(Date.now()));
-    } catch {
-      // ignore storage errors
-    }
-    try {
-      await runtimeHost.restartEngine();
-      const refreshed = await refreshReadyClient(state.client, state.runtimeSurface);
-      return refreshed.token;
-    } finally {
-      try {
-        window.localStorage.removeItem(RESTART_STARTED_KEY);
-        window.localStorage.removeItem(RESTART_ROUTE_KEY);
-      } catch {
-        // ignore storage errors
-      }
-    }
-  };
-
   return (
     <ClientProvider
       client={state.client}
       token={state.token}
       modelName={state.modelName}
       ingressLimits={state.ingressLimits}
+      webuiCapabilities={state.webuiCapabilities}
+      allowUpdateFlow={state.runtimeSurface !== "native"}
     >
-      <Shell
+      <BrowserNotifications client={state.client} />
+      <BackgroundProvider><RemoteInstances><ToastProvider><Shell
         runtimeSurface={state.runtimeSurface}
-        onModelNameChange={handleModelNameChange}
-        onLogout={handleLogout}
-        onNativeEngineRestart={handleNativeEngineRestart}
-      />
+        onModelNameChange={changeModelName}
+        onLogout={logout}
+        onNativeEngineRestart={restartEngine}
+      /></ToastProvider></RemoteInstances></BackgroundProvider>
     </ClientProvider>
   );
+}
+
+function restorePinOrder(pins: readonly string[], previous: readonly string[], restoring: ReadonlySet<string>) {
+  const next = [...pins];
+  previous.forEach((key, index) => {
+    if (!restoring.has(key) || next.includes(key)) return;
+    const successor = previous.slice(index + 1).find((candidate) => next.includes(candidate));
+    const predecessor = previous.slice(0, index).reverse().find((candidate) => next.includes(candidate));
+    const offset = successor !== undefined ? next.indexOf(successor)
+      : predecessor !== undefined ? next.indexOf(predecessor) + 1 : next.length;
+    next.splice(offset, 0, key);
+  });
+  return next;
 }
 
 function Shell({
@@ -1093,38 +437,83 @@ function Shell({
   onNativeEngineRestart: () => Promise<string>;
 }) {
   const { t, i18n } = useTranslation();
+  const showToast = useToast()!; // App always renders Shell inside ToastProvider.
+  const remoteConnections = useRemoteConnections();
+  const versionCheck = useVersionCheck();
+  const updateFlow = useUpdateFlow();
+  const localActive = remoteConnections?.localActive !== false;
+  const managingConnections = remoteConnections?.managing === true && !remoteConnections?.activeHostId;
+  const { theme, preference: themePreference, toggle, setTheme } = useTheme();
+  const managementMain = useRef<HTMLElement>(null);
+  const reportManagementSurface = remoteConnections?.reportManagementSurface;
+  useEffect(() => {
+    const main = managementMain.current;
+    if (!main || !reportManagementSurface) return;
+    const report = () => {
+      const rect = main.getBoundingClientRect();
+      reportManagementSurface({ left: rect.left, top: rect.top, width: rect.width, height: rect.height }, theme);
+    };
+    const observer = new ResizeObserver(report);
+    observer.observe(main);
+    window.addEventListener("resize", report);
+    report();
+    return () => { observer.disconnect(); window.removeEventListener("resize", report); };
+  }, [reportManagementSurface, theme]);
+  const remoteConnectionsRef = useRef(remoteConnections);
+  remoteConnectionsRef.current = remoteConnections;
   const { client, getToken } = useClient();
-  const { theme, toggle } = useTheme();
+  useReconnectRuns(client, getToken);
   const {
     sessions,
     loading,
+    initialLoading: sessionsInitialLoading,
+    error: sessionsError,
     refresh,
     createChat,
     forkChat,
     deleteChat,
     getSessionAutomations,
   } = useSessions();
+  // Failed reads retain an empty list or partial reload cache, not proof of deletion.
+  const sessionsLoaded = !loading && sessionsError === null;
   const {
     state: sidebarState,
     loading: sidebarStateLoading,
     update: updateSidebarState,
+    save: saveSidebarState,
+    rename: onRequestRename,
   } =
-    useSidebarState(sessions, !loading);
+    useSidebarState(sessions, sessionsLoaded);
   const initialRouteRef = useRef<ShellRoute | null>(null);
   if (!initialRouteRef.current) initialRouteRef.current = readShellRoute();
   const [activeKey, setActiveKey] = useState<string | null>(
     initialRouteRef.current.activeKey,
   );
   const [view, setView] = useState<ShellView>(initialRouteRef.current.view);
+  const [chatVisited, setChatVisited] = useState(initialRouteRef.current.view === "chat");
+  useEffect(() => {
+    if (view === "chat") setChatVisited(true);
+  }, [view]);
+  useEffect(() => {
+    // Normalize legacy links while retaining their return destination in history.
+    if (new URLSearchParams(window.location.hash.split("?")[1]).has("chat")) {
+      writeShellRoute(initialRouteRef.current!, true);
+    }
+  }, []);
   const [temporarySessions, setTemporarySessions] = useState<Record<string, ChatSummary>>({});
   const [temporaryChatEnabled, setTemporaryChatEnabled] = useState(false);
   const [settingsInitialSection, setSettingsInitialSection] =
     useState<SettingsSectionKey>(initialRouteRef.current.settingsSection);
-  const [hostSidebarOpen, setHostSidebarOpen] =
-    useState<boolean>(readSidebarOpen);
+  const [settingsFocus, setSettingsFocus] = useState<SettingsFocusTarget | undefined>(initialRouteRef.current.settingsFocus);
+  const [preferredSidebarOpen, setPreferredSidebarOpen] = useState(readSidebarOpen);
   const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
   const [sidebarDragging, setSidebarDragging] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  useEffect(() => {
+    // The drawer portals outside the local host panel; don't leave it over a remote view.
+    if (!localActive || managingConnections) setMobileSidebarOpen(false);
+  }, [localActive, managingConnections]);
+  const mobileSidebarRef = useRef<HTMLDivElement>(null);
   const [sessionSearchOpen, setSessionSearchOpen] = useState(false);
   const mobileWorkbench = useMediaQuery("(max-width: 767px)");
   const workbenchState = sidebarState.workbench;
@@ -1138,15 +527,15 @@ function Shell({
   }, [updateSidebarState]);
   const lastActivePaneByTabRef = useRef(new Map<string, string>());
   const [creatingPane, setCreatingPane] = useState(false);
-  const topicSessions = sessions;
-  const [pendingDelete, setPendingDelete] = useState<{
-    items: SidebarDeleteItem[];
-    automations?: SessionAutomationJob[];
-  } | null>(null);
-  const [pendingRename, setPendingRename] = useState<{
-    key: string;
-    label: string;
-  } | null>(null);
+  const [deletingKeys, setDeletingKeys] = useState<Set<string>>(() => new Set());
+  const topicSessions = useMemo(() => deletingKeys.size === 0 ? sessions
+    : sessions.filter((session) => !deletingKeys.has(session.key)), [deletingKeys, sessions]);
+  const archiveUndoOwners = useRef(new Map<string, { operation: symbol; pinOrder?: string[] }>());
+  const canNavigateArchiveRef = useRef(false);
+  useEffect(() => {
+    canNavigateArchiveRef.current = localActive && !managingConnections;
+    return () => { canNavigateArchiveRef.current = false; };
+  }, [localActive, managingConnections]);
   const [pendingTabRename, setPendingTabRename] = useState<{
     key: string;
     label: string;
@@ -1156,21 +545,18 @@ function Shell({
     label: string;
   } | null>(null);
   const restartSawDisconnectRef = useRef(false);
-  const [restartToast, setRestartToast] = useState<string | null>(null);
+  const restartStartedAtRef = useRef(0);
   const [isRestarting, setIsRestarting] = useState(false);
-  const [pairingRequests, setPairingRequests] = useState<PairingRequestInfo[]>([]);
-  const [pairingBusyCode, setPairingBusyCode] = useState<string | null>(null);
-  const [pairingError, setPairingError] = useState<string | null>(null);
-  const pairingRefreshRef = useRef<Promise<number> | null>(null);
-  const [snoozedPairingCodes, setSnoozedPairingCodes] = useState<Map<string, number>>(
-    () => new Map(),
-  );
   const [runningChatIds, setRunningChatIds] = useState<Set<string>>(() => new Set());
   const [updatedChatIds, setUpdatedChatIds] = useState<Set<string>>(readSessionUpdateChatIds);
   const [workspaces, setWorkspaces] = useState<WorkspacesPayload | null>(null);
-  const skills = useSkills(getToken);
-  const pageVisible = usePageVisibility();
+  const { skills, loading: skillsLoading, error: skillsError } = useSkills(getToken);
   const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsPayload | null>(null);
+  const [settingsLoading, setSettingsLoading] = useState(true);
+  const settingsSnapshotRef = useRef(settingsSnapshot);
+  settingsSnapshotRef.current = settingsSnapshot;
+  const settingsOwnsSnapshot = view !== "chat" && view !== "remote";
+  const settingsRefreshGenerationRef = useRef(0);
   const [pendingAutomationMessage, setPendingAutomationMessage] = useState<{
     id: string;
     chatId: string;
@@ -1180,7 +566,11 @@ function Shell({
   } | null>(null);
   const settingsExitGuardRef = useRef<SettingsExitGuard | null>(null);
   const currentShellRouteRef = useRef<ShellRoute>({ view, activeKey, settingsSection: settingsInitialSection });
-  currentShellRouteRef.current = { view, activeKey, settingsSection: settingsInitialSection };
+  currentShellRouteRef.current = {
+    view, activeKey, settingsSection: settingsInitialSection,
+    settingsFocus,
+    temporary: Boolean(activeKey && temporarySessions[activeKey]),
+  };
   const registerSettingsExitGuard = useCallback((guard: SettingsExitGuard | null) => {
     settingsExitGuardRef.current = guard;
   }, []);
@@ -1199,7 +589,7 @@ function Shell({
   const showMainSidebar = view !== "settings";
   const activeTemporarySession = activeKey ? temporarySessions[activeKey] ?? null : null;
   const temporaryChatId = activeTemporarySession?.chatId ?? null;
-  const temporaryChatActive = view === "chat" && temporaryChatId !== null;
+  const temporaryChatActive = temporaryChatId !== null;
   const temporaryChatRequested = temporaryChatActive || temporaryChatEnabled;
   const temporarySessionList = useMemo(
     () => Object.values(temporarySessions).sort((a, b) => (
@@ -1207,48 +597,99 @@ function Shell({
     )),
     [temporarySessions],
   );
+  // Start each confirmed empty period collapsed without overwriting the saved preference.
+  const [emptySidebarOpen, setEmptySidebarOpen] = useState<boolean | null>(null);
+  const hasSessions = sessions.length > 0 || temporarySessionList.length > 0;
+  if (hasSessions && emptySidebarOpen !== null) setEmptySidebarOpen(null);
+  if (!hasSessions && sessionsLoaded && emptySidebarOpen === null) setEmptySidebarOpen(false);
+  const hostSidebarOpen = emptySidebarOpen ?? preferredSidebarOpen;
+  const setHostSidebarOpen = emptySidebarOpen === null ? setPreferredSidebarOpen : setEmptySidebarOpen;
+
   const temporaryChatIds = useMemo(
     () => temporarySessionList.map((session) => session.chatId),
     [temporarySessionList],
   );
+  // Pane shells can unmount during navigation. Keep replay state for this app
+  // session, pinning temporary chats because they cannot reload disk history.
+  const retainedTemporaryChatIdsRef = useRef(new Set<string>());
+  const [draftStore] = useState(() => new ComposerDraftStore());
+  const [filePreviewStore] = useState(() => new FilePreviewStore());
+  const [threadMessageCache] = useState(() => new ThreadMessageCache(
+    (key) => retainedTemporaryChatIdsRef.current.has(key),
+  ));
+  useEffect(() => {
+    const retained = new Set(temporaryChatIds);
+    for (const chatId of retainedTemporaryChatIdsRef.current) {
+      if (!retained.has(chatId)) {
+        threadMessageCache.delete(chatId);
+        filePreviewStore.delete(`websocket:${chatId}`);
+        draftStore.delete(`websocket:${chatId}`);
+      }
+    }
+    retainedTemporaryChatIdsRef.current = retained;
+  }, [temporaryChatIds, threadMessageCache, filePreviewStore, draftStore]);
 
+  const commitNavigation = useCallback((route: ShellRoute, options?: { replace?: boolean }) => {
+    // The visible sidebar always belongs to its existing host. Navigation
+    // dismisses global management without switching to a different host.
+    if (remoteConnectionsRef.current?.managing) remoteConnectionsRef.current.closeManagement();
+    setActiveKey(route.activeKey);
+    setView(route.view);
+    setSettingsInitialSection(route.settingsSection);
+    setSettingsFocus(route.settingsFocus);
+    writeShellRoute({
+      ...route,
+      temporary: route.temporary || Boolean(route.activeKey && temporarySessionsRef.current[route.activeKey]),
+    }, options?.replace);
+  }, []);
+  const changesVisibleSession = useCallback((current: ShellRoute, next: ShellRoute) => {
+    if (current.view !== "chat" || next.view !== "chat" || current.activeKey === next.activeKey) return false;
+    if (mobileWorkbench || !current.activeKey || !next.activeKey) return true;
+    return workbenchTabForPane(workbenchState, current.activeKey).tabKey
+      !== workbenchTabForPane(workbenchState, next.activeKey).tabKey;
+  }, [mobileWorkbench, workbenchState]);
   const navigate = useCallback(
-    (route: ShellRoute, options?: { replace?: boolean }) => {
-      const leave = () => {
-        setActiveKey(route.activeKey);
-        setView(route.view);
-        setSettingsInitialSection(route.settingsSection);
-        writeShellRoute(route, options?.replace);
-      };
-      if (currentShellRouteRef.current.view === "settings" && route.view !== "settings" && settingsExitGuardRef.current) {
-        settingsExitGuardRef.current(leave);
+    (route: ShellRoute, options?: { replace?: boolean; animate?: boolean }) => {
+      const current = currentShellRouteRef.current;
+      const leave = () => transitionSession(
+        () => commitNavigation(route, options),
+        options?.animate !== false && changesVisibleSession(current, route),
+      );
+      if (changesSettingsSurface(current, route) && settingsExitGuardRef.current) {
+        settingsExitGuardRef.current(leave, { promptRestart: current.view !== route.view });
       } else leave();
     },
-    [],
+    [commitNavigation, changesVisibleSession],
   );
 
   useEffect(() => {
     const applyRoute = () => {
       const route = readShellRoute();
-      if (currentShellRouteRef.current.view === "settings" && route.view !== "settings" && settingsExitGuardRef.current) {
-        writeShellRoute(currentShellRouteRef.current, true);
+      if (route.view === "remote") setMobileSidebarOpen(false);
+      const current = currentShellRouteRef.current;
+      if (changesSettingsSurface(current, route) && settingsExitGuardRef.current) {
+        writeShellRoute(current, true);
         settingsExitGuardRef.current(() => {
           setActiveKey(route.activeKey);
           setView(route.view);
           setSettingsInitialSection(route.settingsSection);
+          setSettingsFocus(route.settingsFocus);
           writeShellRoute(route, true);
           setWorkspaceError(null);
           if (route.view === "chat" && !route.activeKey) setDraftWorkspaceScope(null);
-        });
+        }, { promptRestart: current.view !== route.view });
         return;
       }
-      setActiveKey(route.activeKey);
-      setView(route.view);
-      setSettingsInitialSection(route.settingsSection);
-      setWorkspaceError(null);
-      if (route.view === "chat" && !route.activeKey) {
-        setDraftWorkspaceScope(null);
-      }
+      transitionSession(() => {
+        setActiveKey(route.activeKey);
+        setView(route.view);
+        setSettingsInitialSection(route.settingsSection);
+        setSettingsFocus(route.settingsFocus);
+        setWorkspaceError(null);
+        if (route.view === "chat" && !route.activeKey) {
+          setDraftWorkspaceScope(null);
+        }
+      }, changesVisibleSession(current, route));
     };
     window.addEventListener("hashchange", applyRoute);
     window.addEventListener("popstate", applyRoute);
@@ -1256,7 +697,7 @@ function Shell({
       window.removeEventListener("hashchange", applyRoute);
       window.removeEventListener("popstate", applyRoute);
     };
-  }, []);
+  }, [changesVisibleSession]);
 
   useEffect(() => {
     temporarySessionsRef.current = temporarySessions;
@@ -1274,24 +715,37 @@ function Shell({
   }, [client]);
 
   useEffect(() => {
+    if (settingsOwnsSnapshot || settingsSnapshotRef.current !== null) {
+      setSettingsLoading(false);
+      return;
+    }
     let cancelled = false;
-    fetchSettings(getToken())
+    const requestGeneration = settingsRefreshGenerationRef.current;
+    setSettingsLoading(true);
+    fetchSettings(getToken(), "", client)
       .then((payload) => {
-        if (!cancelled) setSettingsSnapshot(payload);
+        if (!cancelled && requestGeneration === settingsRefreshGenerationRef.current) {
+          setSettingsSnapshot(payload);
+        }
       })
       .catch(() => {
-        if (!cancelled) setSettingsSnapshot(null);
+        if (!cancelled && requestGeneration === settingsRefreshGenerationRef.current) {
+          setSettingsSnapshot(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setSettingsLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [getToken]);
+  }, [client, getToken, settingsOwnsSnapshot]);
 
   useEffect(() => {
     try {
       window.localStorage.setItem(
         SIDEBAR_STORAGE_KEY,
-        hostSidebarOpen ? "1" : "0",
+        preferredSidebarOpen ? "1" : "0",
       );
     } catch {
       // ignore storage errors (private mode, etc.)
@@ -1301,71 +755,19 @@ function Shell({
     } catch {
       // Storage can be unavailable in private browsing.
     }
-  }, [hostSidebarOpen, sidebarWidth]);
+  }, [preferredSidebarOpen, sidebarWidth]);
 
   useEffect(() => {
     writeSessionUpdateChatIds(updatedChatIds);
   }, [updatedChatIds]);
 
-  const refreshPairingRequests = useCallback((): Promise<number> => {
-    if (pairingRefreshRef.current) return pairingRefreshRef.current;
-
-    const request = (async () => {
-      try {
-        const payload = await fetchPairingRequests(getToken());
-        const requests = Array.isArray(payload.requests) ? payload.requests : [];
-        setPairingRequests(requests);
-        setSnoozedPairingCodes((current) => {
-          if (current.size === 0) return current;
-          const activeCodes = new Set(requests.map((request) => request.code));
-          const now = Date.now();
-          const next = new Map(
-            Array.from(current).filter(
-              ([code, snoozedUntil]) => activeCodes.has(code) && snoozedUntil > now,
-            ),
-          );
-          return next.size === current.size ? current : next;
-        });
-        return requests.length;
-      } catch {
-        // Pairing is an opportunistic WebUI affordance. The slash command path
-        // remains available if this polling request fails.
-        return 0;
-      }
-    })();
-    const clearRequest = () => {
-      if (pairingRefreshRef.current === request) pairingRefreshRef.current = null;
-    };
-    pairingRefreshRef.current = request;
-    void request.then(clearRequest, clearRequest);
-    return request;
-  }, [getToken]);
-
-  useEffect(() => {
-    if (!pageVisible) return undefined;
-
-    let disposed = false;
-    let timer: number | null = null;
-    const poll = async () => {
-      const requestCount = await refreshPairingRequests();
-      if (disposed) return;
-      timer = window.setTimeout(
-        () => void poll(),
-        requestCount > 0 ? PAIRING_POLL_INTERVAL_MS : PAIRING_IDLE_POLL_INTERVAL_MS,
-      );
-    };
-    void poll();
-    return () => {
-      disposed = true;
-      if (timer !== null) window.clearTimeout(timer);
-    };
-  }, [pageVisible, refreshPairingRequests]);
+  useEffect(() => client.onReady(() => invalidateToolsCatalog(client)), [client]);
 
   const activeSession = useMemo<ChatSummary | null>(() => {
     if (!activeKey) return null;
     if (temporarySessions[activeKey]) return temporarySessions[activeKey];
-    return sessions.find((s) => s.key === activeKey) ?? null;
-  }, [sessions, activeKey, temporarySessions]);
+    return topicSessions.find((s) => s.key === activeKey) ?? null;
+  }, [topicSessions, activeKey, temporarySessions]);
   const activeTabMatch = useMemo(() => (
     activeKey && !temporarySessions[activeKey]
       ? workbenchTabForPane(workbenchState, activeKey)
@@ -1437,7 +839,7 @@ function Shell({
   }, [refreshWorkspaces]);
 
   useEffect(() => {
-    if (loading) return;
+    if (!sessionsLoaded) return;
     const knownChatIds = new Set(sessions.map((session) => session.chatId));
     setUpdatedChatIds((current) => {
       const next = new Set(
@@ -1449,16 +851,16 @@ function Shell({
       const entries = Object.entries(current).filter(([chatId]) => knownChatIds.has(chatId));
       return entries.length === Object.keys(current).length ? current : Object.fromEntries(entries);
     });
-  }, [loading, sessions]);
+  }, [sessionsLoaded, sessions]);
 
   useEffect(() => {
-    if (loading || sidebarStateLoading) return;
+    if (!sessionsLoaded || sidebarStateLoading) return;
     const validKeys = new Set(sessions.map((session) => session.key));
     updateWorkbenchState((current) => {
       return reconcileWorkbench(current, validKeys);
     });
   }, [
-    loading,
+    sessionsLoaded,
     sidebarStateLoading,
     sessions,
     updateWorkbenchState,
@@ -1472,12 +874,14 @@ function Shell({
     }
     if (!activeKey) return;
     const currentRoute = readShellRoute();
+    if (temporarySessions[activeKey]) return;
     if (currentRoute.temporary) {
-      if (temporarySessions[activeKey]) return;
-      navigate(defaultShellRoute(), { replace: true });
+      navigate(currentRoute.view === "chat" ? defaultShellRoute() : {
+        ...currentRoute, activeKey: null, temporary: false,
+      }, { replace: true });
       return;
     }
-    if (sessions.some((session) => session.key === activeKey)) return;
+    if (topicSessions.some((session) => session.key === activeKey)) return;
     // WebKit can commit the route before useSessions' optimistic insert.
     // Keep that just-created destination valid until the session list catches up.
     if (pendingCreatedKey === activeKey) return;
@@ -1490,7 +894,7 @@ function Shell({
           },
       { replace: true },
     );
-  }, [activeKey, loading, navigate, sessions, temporarySessions]);
+  }, [activeKey, loading, navigate, sessions, temporarySessions, topicSessions]);
 
   useEffect(() => {
     return client.onSessionUpdate((chatId, scope, workspaceScope) => {
@@ -1538,30 +942,11 @@ function Shell({
     for (const chatId of activeRunIds) {
       client.attach(chatId);
     }
-    setRunningChatIds((current) => {
-      let changed = false;
-      const next = new Set(current);
-      for (const chatId of activeRunIds) {
-        if (!next.has(chatId)) changed = true;
-        next.add(chatId);
-      }
-      if (!changed) return current;
-      runningChatIdsRef.current = next;
-      return next;
-    });
-    setUpdatedChatIds((current) => {
-      let changed = false;
-      const next = new Set(current);
-      for (const chatId of activeRunIds) {
-        if (next.delete(chatId)) changed = true;
-      }
-      return changed ? next : current;
-    });
   }, [client, loading, sessions]);
 
   const openHostSidebar = useCallback(() => {
     setHostSidebarOpen(true);
-  }, []);
+  }, [setHostSidebarOpen]);
 
   const closeMobileSidebar = useCallback(() => {
     setMobileSidebarOpen(false);
@@ -1572,11 +957,11 @@ function Shell({
       typeof window !== "undefined" &&
       window.matchMedia("(min-width: 1024px)").matches;
     if (isNativeHost) {
-      setHostSidebarOpen((v) => !v);
+      setHostSidebarOpen(!hostSidebarOpen);
     } else {
       setMobileSidebarOpen((v) => !v);
     }
-  }, []);
+  }, [hostSidebarOpen, setHostSidebarOpen]);
 
   const applyWorkspaceScope = useCallback(
     (scope: WorkspaceScopePayload) => {
@@ -1767,6 +1152,7 @@ function Shell({
 
   const onSelectChat = useCallback(
     (key: string) => {
+      if (deletingKeys.has(key)) return;
       const selectedTemporary = temporarySessionsRef.current[key];
       const selected = selectedTemporary
         ?? sessions.find((session) => session.key === key);
@@ -1793,7 +1179,7 @@ function Shell({
       });
       setMobileSidebarOpen(false);
     },
-    [navigate, sessions],
+    [deletingKeys, navigate, sessions],
   );
 
   const onCloseTemporaryChat = useCallback((key: string) => {
@@ -1807,12 +1193,15 @@ function Shell({
     if (activeKey === key) {
       if (remaining.length === 0) setDraftWorkspaceScope(null);
       setWorkspaceError(null);
+      // Closing invalidates the source session immediately. Commit its replacement
+      // in the same batch rather than leaving cleanup an invalid active route
+      // while a view-transition capture is pending.
       navigate({
         view: "chat",
         activeKey: remaining[0]?.key ?? null,
         settingsSection: "overview",
         ...(remaining[0] ? { temporary: true } : {}),
-      }, { replace: true });
+      }, { replace: true, animate: false });
     }
     setMobileSidebarOpen(false);
   }, [activeKey, client, navigate, temporarySessionList]);
@@ -1833,32 +1222,6 @@ function Shell({
       });
     },
     [updateSidebarState],
-  );
-
-  const onRequestRename = useCallback((key: string, label: string) => {
-    setPendingRename({ key, label });
-  }, []);
-
-  const onConfirmRename = useCallback(
-    (title: string) => {
-      if (!pendingRename) return;
-      const key = pendingRename.key;
-      setPendingRename(null);
-      void updateSidebarState((current) => {
-        const titleOverrides = { ...current.title_overrides };
-        const cleaned = title.trim();
-        if (cleaned) {
-          titleOverrides[key] = cleaned;
-        } else {
-          delete titleOverrides[key];
-        }
-        return {
-          ...current,
-          title_overrides: titleOverrides,
-        };
-      });
-    },
-    [pendingRename, updateSidebarState],
   );
 
   const onRequestRenameTab = useCallback((key: string, label: string) => {
@@ -1928,34 +1291,94 @@ function Shell({
     [pendingProjectRename, updateSidebarState],
   );
 
-  const onToggleArchive = useCallback(
-    (key: string) => {
-      void updateSidebarState((current) => {
-        const archived = new Set(current.archived_keys);
-        const pinned = current.pinned_keys.filter((item) => item !== key);
-        if (archived.has(key)) {
-          archived.delete(key);
-        } else {
-          archived.add(key);
-        }
-        return {
-          ...current,
-          pinned_keys: pinned,
-          archived_keys: Array.from(archived),
-        };
+  const titleForSession = useCallback((session: ChatSummary) => (
+    sidebarState.title_overrides[session.key]
+    || session.title
+    || deriveTitle(session.preview, t("chat.newChat"))
+  ), [sidebarState.title_overrides, t]);
+
+  const onArchiveMany = useCallback(
+    (keys: string[], archive: boolean) => {
+      if (sidebarStateLoading) return;
+      const persistedSessions = new Map(topicSessions
+        .filter((session) => session.projectLocked !== false)
+        .map((session) => [session.key, session]));
+      const operation = Symbol();
+      const selected = new Set<string>();
+      let pinOrder: string[] = [];
+      let removedPins = new Set<string>();
+      let archivedAfterSave: string[] = [];
+      const reportFailure = () => showToast({
+        message: t("toast.archiveFailed"), tone: "error", dedupeKey: "archive-failed",
       });
-      if (activeKey === key && !sidebarState.archived_keys.includes(key)) {
-        const archived = new Set([...sidebarState.archived_keys, key]);
-        const next = topicSessions.find((session) => !archived.has(session.key));
-        navigate({
-          view: "chat",
-          activeKey: next?.key ?? null,
-          settingsSection: "overview",
+      const owned = (key: string) => archiveUndoOwners.current.get(key)?.operation === operation;
+      const release = () => {
+        for (const key of selected) if (owned(key)) archiveUndoOwners.current.delete(key);
+      };
+      const changeArchive = (current: SidebarStatePayload, affected: ReadonlySet<string>, archived: boolean) => ({
+        ...current,
+        archived_keys: archived
+          ? [...new Set([...current.archived_keys, ...affected])]
+          : current.archived_keys.filter((key) => !affected.has(key)),
+      });
+      setMobileSidebarOpen(false);
+      void saveSidebarState((current) => {
+        for (const key of keys) {
+          if (persistedSessions.has(key) && current.archived_keys.includes(key) !== archive) selected.add(key);
+        }
+        if (!selected.size) return null;
+        // Include pins removed by earlier, still-undoable operations so either undo order works.
+        removedPins = new Set(current.pinned_keys.filter((key) => selected.has(key)));
+        pinOrder = current.pinned_keys;
+        for (const [key, previous] of archiveUndoOwners.current) {
+          if (previous.pinOrder) pinOrder = restorePinOrder(pinOrder, previous.pinOrder, new Set([key]));
+        }
+        const apply = (state: SidebarStatePayload) => ({
+          ...changeArchive(state, selected, archive),
+          pinned_keys: state.pinned_keys.filter((key) => !selected.has(key)),
         });
-      }
+        archivedAfterSave = apply(current).archived_keys;
+        return apply;
+      }).then(() => {
+        if (!selected.size) return;
+        for (const key of selected) {
+          archiveUndoOwners.current.set(key, { operation, pinOrder: removedPins.has(key) ? pinOrder : undefined });
+        }
+        const singleTopic = selected.size === 1 ? persistedSessions.get([...selected][0]) : undefined;
+        showToast({
+          tone: "success",
+          detail: singleTopic ? titleForSession(singleTopic) : undefined,
+          message: archive
+            ? t(selected.size === 1 ? "toast.archivedSingle" : "toast.archived", { count: selected.size })
+            : t(selected.size === 1 ? "toast.unarchivedSingle" : "toast.unarchived", { count: selected.size }),
+          onExpire: release,
+          action: { label: t("toast.undo"), run: () => {
+            void saveSidebarState((current) => {
+              const restoring = new Set([...selected].filter((key) => (
+                owned(key) && current.archived_keys.includes(key) === archive
+              )));
+              if (!restoring.size) return null;
+              const restoringPins = new Set([...restoring].filter((key) => removedPins.has(key)));
+              return (state) => ({
+                ...changeArchive(state, restoring, !archive),
+                pinned_keys: restorePinOrder(state.pinned_keys, pinOrder, restoringPins),
+              });
+            }).then(release, () => { release(); reportFailure(); });
+          } },
+        });
+        const route = currentShellRouteRef.current;
+        if (archive && canNavigateArchiveRef.current && route.view === "chat" && route.activeKey && selected.has(route.activeKey)) {
+          const next = topicSessions.find((session) => !archivedAfterSave.includes(session.key));
+          navigate({ view: "chat", activeKey: next?.key ?? null, settingsSection: "overview" });
+        }
+      }, reportFailure);
     },
-    [activeKey, navigate, sidebarState.archived_keys, topicSessions, updateSidebarState],
+    [navigate, saveSidebarState, showToast, sidebarStateLoading, t, titleForSession, topicSessions],
   );
+
+  const onToggleArchive = useCallback((key: string) => {
+    onArchiveMany([key], !sidebarState.archived_keys.includes(key));
+  }, [onArchiveMany, sidebarState.archived_keys]);
 
   const onToggleArchived = useCallback(() => {
     void updateSidebarState((current) => ({
@@ -2044,6 +1467,16 @@ function Shell({
   const onOpenModelSettings = useCallback(() => {
     onOpenSettings("models");
   }, [onOpenSettings]);
+  const onInspectImagePreset = useCallback((name: string) => {
+    setSessionSearchOpen(false);
+    navigate({ view: "settings", activeKey, settingsSection: "models", settingsFocus: `image-input:${name}` });
+    setMobileSidebarOpen(false);
+  }, [activeKey, navigate]);
+  const onOpenSandboxSettings = useCallback((target: SettingsFocusTarget) => {
+    setSessionSearchOpen(false);
+    navigate({ view: "settings", activeKey, settingsSection: "advanced", settingsFocus: target });
+    setMobileSidebarOpen(false);
+  }, [activeKey, navigate]);
 
   const onOpenApps = useCallback(() => {
     setSessionSearchOpen(false);
@@ -2057,22 +1490,11 @@ function Shell({
     setMobileSidebarOpen(false);
   }, [activeKey, navigate]);
 
-  const onOpenChannels = useCallback(() => {
-    setSessionSearchOpen(false);
-    navigate({ view: "channels", activeKey, settingsSection: "channels" });
-    setMobileSidebarOpen(false);
-  }, [activeKey, navigate]);
-
-  const onOpenSkills = useCallback(() => {
-    setSessionSearchOpen(false);
-    navigate({ view: "skills", activeKey, settingsSection: "skills" });
-    setMobileSidebarOpen(false);
-  }, [activeKey, navigate]);
-
   useEffect(() => {
     const actions = { newChat: onNewChat, search: onOpenSessionSearch, apps: onOpenApps,
-      skills: onOpenSkills, automations: onOpenAutomations, channels: onOpenChannels, settings: () => onOpenSettings() };
+      automations: onOpenAutomations, settings: () => onOpenSettings() };
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (!localActive) return;
       const action = matchSidebarShortcut(event);
       if (!action) return;
       event.preventDefault();
@@ -2080,29 +1502,30 @@ function Shell({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onNewChat, onOpenSessionSearch, onOpenApps, onOpenSkills, onOpenAutomations, onOpenChannels, onOpenSettings]);
+  }, [localActive, onNewChat, onOpenSessionSearch, onOpenApps, onOpenAutomations, onOpenSettings]);
 
   const onSettingsSectionChange = useCallback(
     (section: SettingsSectionKey) => {
-      navigate({
-        view: shellViewForSettingsSection(section),
-        activeKey,
-        settingsSection: section,
-      });
+      const route = { view: shellViewForSettingsSection(section), activeKey, settingsSection: section };
+      // The page has completed or retained its outgoing drafts for in-page transitions.
+      if (currentShellRouteRef.current.view === route.view) commitNavigation(route);
+      else navigate(route);
     },
-    [activeKey, navigate],
+    [activeKey, commitNavigation, navigate],
   );
 
   const onBackToChat = useCallback(() => {
     setMobileSidebarOpen(false);
     const nextKey = (() => {
       if (!activeKey) return null;
+      if (temporarySessionsRef.current[activeKey]) return activeKey;
       if (topicSessions.some((session) => session.key === activeKey)) return activeKey;
-      return topicSessions[0]?.key ?? null;
+      return null;
     })();
     navigate({
       view: "chat",
       activeKey: nextKey,
+      temporary: Boolean(nextKey && temporarySessionsRef.current[nextKey]),
       settingsSection: "overview",
     });
   }, [activeKey, navigate, topicSessions]);
@@ -2111,10 +1534,11 @@ function Shell({
     const chatId = activeSession?.chatId ?? client.defaultChatId;
     if (!chatId) return;
     restartSawDisconnectRef.current = false;
+    restartStartedAtRef.current = Date.now();
     setIsRestarting(true);
     rememberRestartRoute();
     try {
-      window.localStorage.setItem(RESTART_STARTED_KEY, String(Date.now()));
+      window.localStorage.setItem(RESTART_STARTED_KEY, String(restartStartedAtRef.current));
     } catch {
       // ignore storage errors
     }
@@ -2128,8 +1552,8 @@ function Shell({
   }, [client, onModelNameChange]);
 
   useEffect(() => {
-    return client.onRunStatus((chatId, startedAt) => {
-      if (startedAt != null) {
+    return client.onRunStatus((chatId, state) => {
+      if (state.active) {
         const nextRunning = new Set(runningChatIdsRef.current);
         nextRunning.add(chatId);
         runningChatIdsRef.current = nextRunning;
@@ -2174,6 +1598,7 @@ function Shell({
       }
       if (!wasOpen) return;
       wasOpen = false;
+      filePreviewStore.clear();
       if (Object.keys(temporarySessionsRef.current).length === 0) return;
       temporarySessionsRef.current = {};
       setTemporarySessions({});
@@ -2181,11 +1606,26 @@ function Shell({
         navigate(defaultShellRoute(), { replace: true });
       }
     });
-  }, [client, navigate]);
+  }, [client, navigate, filePreviewStore]);
 
   useEffect(() => {
-    return client.onStatus((status) => {
-      const startedAt = (() => {
+    let cancelled = false;
+    let retryTimer: number | undefined;
+    const refreshSettings = (generation: number, attempt = 0): void => {
+      void fetchSettings(getToken(), "", client)
+        .then((payload) => {
+          if (!cancelled && generation === settingsRefreshGenerationRef.current) {
+            setSettingsSnapshot(payload);
+          }
+        })
+        .catch(() => {
+          if (cancelled || generation !== settingsRefreshGenerationRef.current || attempt >= 3) return;
+          retryTimer = window.setTimeout(() => refreshSettings(generation, attempt + 1), 250);
+        });
+    };
+    const unsubscribe = client.onStatus((status) => {
+      // Another tab can consume the reload marker before this tab reconnects.
+      const startedAt = restartStartedAtRef.current || (() => {
         try {
           return Number(window.localStorage.getItem(RESTART_STARTED_KEY) ?? "0");
         } catch {
@@ -2194,6 +1634,7 @@ function Shell({
       })();
       if (!startedAt) return;
       if (status !== "open") {
+        restartStartedAtRef.current = startedAt;
         restartSawDisconnectRef.current = true;
         return;
       }
@@ -2205,147 +1646,224 @@ function Shell({
       } catch {
         // ignore storage errors
       }
+      const refreshGeneration = ++settingsRefreshGenerationRef.current;
+      restartStartedAtRef.current = 0;
       setIsRestarting(false);
-      setRestartToast(t("app.restart.completed", { seconds: (elapsedMs / 1000).toFixed(1) }));
-      window.setTimeout(() => setRestartToast(null), 3_500);
+      showToast({ message: t("app.restart.completed", { seconds: (elapsedMs / 1000).toFixed(1) }), tone: "success", dedupeKey: "restart-completed" });
+      refreshSettings(refreshGeneration);
     });
-  }, [client, t]);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+    };
+  }, [client, getToken, showToast, t]);
 
   const onTurnEnd = useDeferredTitleRefresh(
     temporaryChatActive ? null : activePaneSession,
     refresh,
   );
 
-  const onConfirmDelete = useCallback(async () => {
-    if (!pendingDelete) return;
-    const items = pendingDelete.items;
-    const deletingKeys = new Set(items.map((item) => item.key));
-    const hasAutomations = (pendingDelete.automations?.length ?? 0) > 0;
-    const deletingActive = activeKey !== null && deletingKeys.has(activeKey);
-    const currentIndex = topicSessions.findIndex((s) => s.key === activeKey);
-    const availableKeys = new Set(topicSessions.map((session) => session.key));
-    const siblingFallbackKey = deletingActive
-      ? activeTabState?.paneKeys.find((key) => (
-          !deletingKeys.has(key) && availableKeys.has(key)
-        )) ?? null
-      : null;
-    const fallbackKey = deletingActive
-      ? (
-          siblingFallbackKey
-          ?? topicSessions.slice(currentIndex + 1).find((session) => (
-            !deletingKeys.has(session.key)
-          ))?.key
-          ?? topicSessions.slice(0, Math.max(0, currentIndex)).reverse().find((session) => (
-            !deletingKeys.has(session.key)
-          ))?.key
-          ?? null
-        )
-      : activeKey;
-    try {
-      for (let index = 0; index < items.length; index += 1) {
-        const item = items[index];
-        const result = await deleteChat(
-          item.key,
-          hasAutomations ? { deleteAutomations: true } : undefined,
-        );
-        if (result.blocked_by_automations) {
-          setPendingDelete({
-            items: items.slice(index),
-            automations: result.automations ?? [],
-          });
-          return;
-        }
-      }
-      setPendingDelete(null);
-      if (deletingActive) {
-        navigate({
-          view: "chat",
-          activeKey: fallbackKey,
-          settingsSection: "overview",
-        }, { replace: true });
-      }
-    } catch (e) {
-      console.error("Failed to delete session", e);
-    }
-  }, [pendingDelete, deleteChat, activeKey, activeTabState, navigate, topicSessions]);
+  const deleteContextRef = useRef({ topicSessions, activeKey, activeTabState, view });
+  deleteContextRef.current = { topicSessions, activeKey, activeTabState, view };
+  const checkingDeleteKeysRef = useRef<Set<string>>(new Set());
+  const showAutomationConfirmRef = useRef<(
+    items: SidebarDeleteItem[],
+    jobsByKey: ReadonlyMap<string, SessionAutomationJob[]>,
+  ) => void>(() => {});
 
-  const onRequestDeleteMany = useCallback(async (items: SidebarDeleteItem[]) => {
-    const uniqueItems = Array.from(new Map(items.map((item) => [item.key, item])).values());
-    if (uniqueItems.length === 0) return;
-    const automationResults = await Promise.allSettled(
-      uniqueItems.map((item) => getSessionAutomations(item.key)),
+  const prepareStagedDelete = useCallback((
+    requested: SidebarDeleteItem[],
+    automationKeys?: ReadonlySet<string>,
+  ): ToastNotice | null => {
+    const {
+      topicSessions: liveSessions,
+      activeKey: currentActiveKey,
+      activeTabState: currentActiveTabState,
+      view: currentView,
+    } = deleteContextRef.current;
+    const items = requested.filter((item) => liveSessions.some((session) => session.key === item.key));
+    if (!items.length) return null;
+    const batchKeys = new Set(items.map((item) => item.key));
+    setDeletingKeys((current) => new Set([...current, ...batchKeys]));
+    closeMobileSidebar();
+
+    if (currentView === "chat" && currentActiveKey && batchKeys.has(currentActiveKey)) {
+      const currentIndex = liveSessions.findIndex((session) => session.key === currentActiveKey);
+      const available = new Set(liveSessions.filter((session) => !batchKeys.has(session.key)).map((session) => session.key));
+      const fallbackKey = currentActiveTabState?.paneKeys.find((key) => available.has(key))
+        ?? liveSessions.slice(currentIndex + 1).find((session) => available.has(session.key))?.key
+        ?? liveSessions.slice(0, Math.max(0, currentIndex)).reverse().find((session) => available.has(session.key))?.key
+        ?? null;
+      navigate({ view: "chat", activeKey: fallbackKey, settingsSection: "overview" }, { replace: true });
+    }
+
+    const reveal = () => setDeletingKeys((current) => new Set([...current].filter((key) => !batchKeys.has(key))));
+    const commit = async () => {
+      let failed = 0;
+      const blockedItems: SidebarDeleteItem[] = [];
+      const blockedJobsByKey = new Map<string, SessionAutomationJob[]>();
+      try {
+        for (const item of items) {
+          try {
+            const result = await deleteChat(
+              item.key,
+              automationKeys?.has(item.key) ? { deleteAutomations: true } : undefined,
+            );
+            if (result.deleted) {
+              filePreviewStore.delete(item.key);
+              draftStore.delete(item.key);
+            } else if (result.blocked_by_automations && result.automations?.length) {
+              blockedItems.push(item);
+              blockedJobsByKey.set(item.key, result.automations);
+            } else {
+              failed++;
+            }
+          } catch (error) {
+            console.error("Failed to delete session", error);
+            failed++;
+          }
+        }
+      } finally {
+        reveal();
+      }
+      if (blockedItems.length) {
+        showAutomationConfirmRef.current(blockedItems, blockedJobsByKey);
+      }
+      if (failed) showToast({
+        message: t(failed === 1 ? "toast.deleteFailedSingle" : "toast.deleteFailed", { count: failed }),
+        tone: "error",
+      });
+    };
+    return {
+      message: t(items.length === 1 ? "toast.pendingDeleteSingle" : "toast.pendingDelete", { count: items.length }),
+      detail: items.length === 1 ? items[0].label : undefined,
+      tone: "pending",
+      action: { label: t("toast.undo"), run: reveal },
+      onExpire: () => { void commit(); },
+    };
+  }, [closeMobileSidebar, deleteChat, draftStore, filePreviewStore, navigate, showToast, t]);
+
+  const buildAutomationDeleteConfirmNotice = useCallback((
+    items: SidebarDeleteItem[],
+    jobsByKey: ReadonlyMap<string, SessionAutomationJob[]>,
+  ): ToastNotice => {
+    const groups: AutomationDeleteSessionGroup[] = items.flatMap((item) => {
+      const jobs = jobsByKey.get(item.key);
+      return jobs?.length ? [{ item, jobs }] : [];
+    });
+    const automationKeys = new Set(groups.map((group) => group.item.key));
+    const totalAutomations = groups.reduce((sum, group) => sum + group.jobs.length, 0);
+    const detailsLabel = totalAutomations === 1
+      ? t("toast.automationCountSingle")
+      : t("toast.automationCount", { count: totalAutomations });
+    return {
+      message: items.length === 1
+        ? t("toast.confirmDeleteAutomationsSingle")
+        : t("toast.confirmDeleteAutomations", { count: items.length }),
+      tone: "pending",
+      persistent: true,
+      dedupeKey: `delete-confirm:${items.map((item) => item.key).sort().join(",")}`,
+      details: {
+        label: detailsLabel,
+        render: (controller) => (
+          <AutomationDeleteToastDetails
+            groups={groups}
+            onExcludeSession={(excludedKey) => {
+              const remainingItems = items.filter((item) => item.key !== excludedKey);
+              if (!remainingItems.length) {
+                controller.dismiss();
+                return;
+              }
+              const nextJobsByKey = new Map(
+                Array.from(jobsByKey.entries()).filter(([key]) => key !== excludedKey),
+              );
+              const stillHasAutomations = remainingItems.some(
+                (item) => (nextJobsByKey.get(item.key)?.length ?? 0) > 0,
+              );
+              if (stillHasAutomations) {
+                controller.update(buildAutomationDeleteConfirmNotice(remainingItems, nextJobsByKey));
+                return;
+              }
+              const staged = prepareStagedDelete(remainingItems);
+              if (staged) controller.update(staged);
+              else controller.dismiss();
+            }}
+          />
+        ),
+      },
+      secondaryAction: { label: t("common.cancel") },
+      action: {
+        label: t("chat.delete"),
+        tone: "destructive",
+        run: () => prepareStagedDelete(items, automationKeys) ?? undefined,
+      },
+    };
+  }, [prepareStagedDelete, t]);
+
+  const showAutomationDeleteConfirmToast = useCallback((
+    items: SidebarDeleteItem[],
+    jobsByKey: ReadonlyMap<string, SessionAutomationJob[]>,
+  ) => {
+    closeMobileSidebar();
+    showToast(buildAutomationDeleteConfirmNotice(items, jobsByKey));
+  }, [buildAutomationDeleteConfirmNotice, closeMobileSidebar, showToast]);
+  showAutomationConfirmRef.current = showAutomationDeleteConfirmToast;
+
+  const onRequestDeleteMany = useCallback(async (requested: SidebarDeleteItem[]) => {
+    const liveKeys = new Set(deleteContextRef.current.topicSessions.map((session) => session.key));
+    const uniqueItems = Array.from(new Map(
+      requested
+        .filter((item) => liveKeys.has(item.key) && !checkingDeleteKeysRef.current.has(item.key))
+        .map((item) => [item.key, item]),
+    ).values());
+    if (!uniqueItems.length) return;
+    for (const item of uniqueItems) checkingDeleteKeysRef.current.add(item.key);
+    const jobsByKey = new Map<string, SessionAutomationJob[]>();
+    try {
+      const results = await Promise.allSettled(
+        uniqueItems.map((item) => getSessionAutomations(item.key)),
+      );
+      results.forEach((result, index) => {
+        if (result.status === "fulfilled" && result.value.length) {
+          jobsByKey.set(uniqueItems[index].key, result.value);
+        }
+      });
+    } finally {
+      for (const item of uniqueItems) checkingDeleteKeysRef.current.delete(item.key);
+    }
+    const stillLiveKeys = new Set(deleteContextRef.current.topicSessions.map((session) => session.key));
+    const items = uniqueItems.filter((item) => stillLiveKeys.has(item.key));
+    if (!items.length) return;
+    const liveJobsByKey = new Map(
+      items.flatMap((item) => {
+        const jobs = jobsByKey.get(item.key);
+        return jobs?.length ? [[item.key, jobs] as const] : [];
+      }),
     );
-    const automations = automationResults.flatMap((result) => (
-      result.status === "fulfilled" ? result.value : []
-    ));
-    setPendingDelete({ items: uniqueItems, automations });
-  }, [getSessionAutomations]);
+    if (liveJobsByKey.size > 0) {
+      showAutomationDeleteConfirmToast(items, liveJobsByKey);
+      return;
+    }
+    const notice = prepareStagedDelete(items);
+    if (notice) showToast(notice);
+  }, [getSessionAutomations, prepareStagedDelete, showAutomationDeleteConfirmToast, showToast]);
 
   const onRequestDelete = useCallback((key: string, label: string) => {
     void onRequestDeleteMany([{ key, label }]);
   }, [onRequestDeleteMany]);
-
-  const visiblePairingRequests = useMemo(
-    () => {
-      const now = Date.now();
-      return pairingRequests.filter((request) => {
-        const snoozedUntil = snoozedPairingCodes.get(request.code);
-        return !snoozedUntil || snoozedUntil <= now;
-      });
-    },
-    [pairingRequests, snoozedPairingCodes],
-  );
-
-  const onPairingAction = useCallback(
-    async (action: "approve" | "deny", code: string) => {
-      setPairingBusyCode(code);
-      setPairingError(null);
-      try {
-        const payload = await runPairingAction(client, action, code);
-        setPairingRequests(Array.isArray(payload.requests) ? payload.requests : []);
-        setSnoozedPairingCodes((current) => {
-          if (!current.has(code)) return current;
-          const next = new Map(current);
-          next.delete(code);
-          return next;
-        });
-      } catch (e) {
-        setPairingError((e as Error).message);
-        void refreshPairingRequests();
-      } finally {
-        setPairingBusyCode(null);
-      }
-    },
-    [client, refreshPairingRequests],
-  );
-
-  const onDismissPairingRequest = useCallback((code: string) => {
-    setSnoozedPairingCodes((current) => {
-      const snoozedUntil = Date.now() + PAIRING_DISMISS_SNOOZE_MS;
-      if (current.get(code) === snoozedUntil) return current;
-      const next = new Map(current);
-      next.set(code, snoozedUntil);
-      return next;
-    });
-  }, []);
-
-  const titleForSession = useCallback((session: ChatSummary) => (
-    sidebarState.title_overrides[session.key]
-    || session.title
-    || deriveTitle(session.preview, t("chat.newChat"))
-  ), [sidebarState.title_overrides, t]);
 
   const automaticSidebarSort = sidebarState.view.sort === "manual"
     ? "updated_desc"
     : sidebarState.view.sort;
   const orderedWorkbenchTabs = useMemo(() => {
     const orderedSessions = sortSessions(
-      sessions,
+      topicSessions,
       automaticSidebarSort,
       sidebarState.title_overrides,
       sidebarState.session_order,
     );
-    const updatedAtByKey = new Map(sessions.map((session) => [
+    const updatedAtByKey = new Map(topicSessions.map((session) => [
       session.key,
       session.updatedAt ?? session.createdAt,
     ]));
@@ -2356,7 +1874,7 @@ function Shell({
     );
   }, [
     automaticSidebarSort,
-    sessions,
+    topicSessions,
     sidebarState.session_order,
     sidebarState.title_overrides,
     workbenchState,
@@ -2366,7 +1884,7 @@ function Shell({
     [orderedWorkbenchTabs],
   );
   const sidebarTabPresentations = useMemo(() => {
-    const sessionsByKey = new Map(sessions.map((session) => [session.key, session]));
+    const sessionsByKey = new Map(topicSessions.map((session) => [session.key, session]));
     return orderedWorkbenchTabs.flatMap((tab) => {
       const anchorKey = tab.tab.paneKeys.find((key) => sessionsByKey.has(key))
         ?? tab.paneKeys[0];
@@ -2391,7 +1909,7 @@ function Shell({
           : anchor,
       }];
     });
-  }, [orderedWorkbenchTabs, sessions, titleForSession]);
+  }, [orderedWorkbenchTabs, topicSessions, titleForSession]);
   const sidebarTopicSessions = useMemo(
     () => sidebarTabPresentations.map((presentation) => presentation.session),
     [sidebarTabPresentations],
@@ -2404,7 +1922,7 @@ function Shell({
     : t("app.brand");
   const workbenchPaneSessions = useMemo(() => {
     if (!activeTabState) return [];
-    const byKey = new Map(sessions.map((session) => [session.key, session]));
+    const byKey = new Map(topicSessions.map((session) => [session.key, session]));
     const sortedPaneKeys = activeTabKey
       ? orderedWorkbenchTabsByKey.get(activeTabKey)?.paneKeys ?? activeTabState.paneKeys
       : activeTabState.paneKeys;
@@ -2415,7 +1933,7 @@ function Shell({
     return paneKeys
       .map((key) => byKey.get(key))
       .filter((session): session is ChatSummary => session !== undefined);
-  }, [activeTabKey, activeTabState, orderedWorkbenchTabsByKey, sessions]);
+  }, [activeTabKey, activeTabState, orderedWorkbenchTabsByKey, topicSessions]);
   const paneChromeEnabled = Boolean(
     activeKey && activeSession && !temporaryChatActive && activeTabState,
   );
@@ -2465,6 +1983,7 @@ function Shell({
           chatId: session.chatId,
           title: titleForSession(session),
           handle: session.handle,
+          projectLocked: session.projectLocked !== false,
         }));
       return [presentation.rowKey, {
         tabKey: orderedTab.tabKey,
@@ -2493,13 +2012,13 @@ function Shell({
   const onSelectSidebarTab = useCallback((tabKey: string) => {
     const tab = workbenchTab(workbenchState, tabKey);
     if (!tab) return;
+    const visiblePaneKeys = tab.paneKeys.filter((key) => !deletingKeys.has(key));
     const rememberedPaneKey = lastActivePaneByTabRef.current.get(tabKey);
-    onSelectChat(
-      rememberedPaneKey && tab.paneKeys.includes(rememberedPaneKey)
-        ? rememberedPaneKey
-        : tab.paneKeys[0],
-    );
-  }, [onSelectChat, workbenchState]);
+    const paneKey = rememberedPaneKey && visiblePaneKeys.includes(rememberedPaneKey)
+      ? rememberedPaneKey
+      : visiblePaneKeys[0];
+    if (paneKey) onSelectChat(paneKey);
+  }, [deletingKeys, onSelectChat, workbenchState]);
 
   const onSelectSidebarItem = useCallback((key: string) => {
     if (
@@ -2544,6 +2063,7 @@ function Shell({
   }, [updateWorkbenchState]);
 
   useEffect(() => {
+    if (!localActive) return;
     if (view === "settings") {
       document.title = t("app.documentTitle.chat", {
         title: t("settings.sidebar.title"),
@@ -2562,20 +2082,14 @@ function Shell({
       });
       return;
     }
-    if (view === "channels") {
-      document.title = t("app.documentTitle.chat", { title: t("settings.nav.channels") });
-      return;
-    }
-    if (view === "skills") {
-      document.title = t("app.documentTitle.chat", {
-        title: t("settings.nav.skills", { defaultValue: "Skills" }),
-      });
+    if (view === "remote") {
+      document.title = t("app.documentTitle.chat", { title: t("remote.title") });
       return;
     }
     document.title = activeSession
       ? t("app.documentTitle.chat", { title: headerTitle })
       : t("app.documentTitle.base");
-  }, [activeSession, headerTitle, i18n.resolvedLanguage, t, view]);
+  }, [localActive, activeSession, headerTitle, i18n.resolvedLanguage, t, view]);
 
   const pinnedPaneKeys = useMemo(
     () => new Set(sidebarState.pinned_keys),
@@ -2598,21 +2112,22 @@ function Shell({
     : activeKey;
 
   const sidebarProps = {
-    sessions: sidebarTopicSessions,
-    temporarySessions: temporarySessionList,
-    activeKey: view === "chat"
+    sessions: sidebarStateLoading ? [] : sidebarTopicSessions,
+    temporarySessions: sidebarStateLoading ? [] : temporarySessionList,
+    activeKey: !managingConnections && view === "chat"
       ? (temporaryChatActive ? activeKey : activeSidebarKey)
       : null,
-    loading,
-    newChatActive: view === "chat" && activeKey === null,
+    loading: loading || sidebarStateLoading,
+    initialLoading: sessionsInitialLoading || sidebarStateLoading,
     onNewChat,
     onSelect: onSelectSidebarItem,
     onCloseTemporaryChat,
     onRequestDelete,
-    onRequestDeleteMany,
+    onRequestDeleteMany: (items: SidebarDeleteItem[]) => { void onRequestDeleteMany(items); },
     onTogglePin,
     onRequestRename,
     onToggleArchive,
+    onArchiveMany,
     onRequestRenameTab,
     paneGroups: sidebarPaneGroups,
     onSelectPane: onSelectSidebarPane,
@@ -2624,13 +2139,17 @@ function Shell({
     onRequestRenameProject,
     onNewChatInProject,
     onOpenSettings,
+    onOpenUpdates: () => onOpenSettings("about"),
+    availableUpdate: localActive && !isNativeRuntime(effectiveRuntimeSurface)
+      && versionCheck.result?.type === "update" && versionCheck.result.latestVersion !== versionCheck.dismissedVersion
+      ? { version: versionCheck.result.latestVersion, onDismiss: versionCheck.dismiss, onRequestUpdate: updateFlow.open,
+        installationMethod: updateFlow.pending ? null : versionCheck.installationMethod }
+      : undefined,
     onOpenApps,
     onOpenAutomations,
-    onOpenChannels,
-    onOpenSkills,
     onSettingsIntent,
     onOpenSearch: onOpenSessionSearch,
-    activeUtility: view === "apps" || view === "automations" || view === "skills" || view === "channels" ? view : null,
+    activeUtility: !managingConnections && (view === "apps" || view === "automations") ? view : null,
     onToggleArchived,
     pinnedKeys: sidebarPinnedTabKeys,
     archivedKeys: sidebarArchivedTabKeys,
@@ -2659,6 +2178,7 @@ function Shell({
 
   return (
     <ThemeProvider theme={theme}>
+      <StarPrompt ready={localActive && !managingConnections && !loading && !sidebarStateLoading} />
       <div
         className={cn(
           "relative h-full w-full overflow-hidden",
@@ -2677,11 +2197,7 @@ function Shell({
                   onClick={toggle}
                   className="h-8 w-8 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
                 >
-                  {theme === "dark" ? (
-                    <Sun className="h-4 w-4" />
-                  ) : (
-                    <Moon className="h-4 w-4" />
-                  )}
+                  <ThemeToggleIcon theme={theme} />
                 </Button>
               )
             }
@@ -2692,33 +2208,38 @@ function Shell({
             "relative flex h-full w-full overflow-hidden",
           )}
         >
-          {/* Host sidebar: in normal flow, so the thread area width stays honest. */}
           {showMainSidebar ? (
             <aside
               data-testid="host-sidebar-flow"
               data-resizing={sidebarDragging || undefined}
+              data-collapsed={!hostSidebarOpen || undefined}
               id="main-sidebar"
               className={cn(
-                "group/sidebar relative z-20 hidden shrink-0 overflow-hidden lg:block",
-                sidebarDragging ? "select-none" : "transition-[width] duration-300 ease-out motion-reduce:transition-none",
+                "sidebar-dock-frame group/sidebar relative z-20 hidden shrink-0 overflow-hidden bg-background lg:block",
+                sidebarDragging && "select-none",
               )}
+              data-theme-surface
               style={{
                 width: hostSidebarFlowWidth,
-              }}
+                "--sidebar-open-width": `${sidebarWidth}px`,
+              } as CSSProperties}
             >
               <div
+                aria-hidden
+                data-theme-surface
                 className={cn(
-                  "absolute inset-y-0 left-0 h-full w-full overflow-hidden",
-                  showHostChrome
-                    ? "host-sidebar-glass"
-                    : "bg-sidebar",
+                  "sidebar-dock-surface pointer-events-none absolute inset-0",
+                  showHostChrome ? "host-sidebar-glass" : "bg-sidebar",
                 )}
-              >
+              />
+              <div className="absolute inset-0">
                 <Sidebar
                   {...sidebarProps}
                   collapsed={!hostSidebarOpen}
                   hostChromeInset={showHostChrome}
                   onExpand={openHostSidebar}
+                  onCollapse={() => setHostSidebarOpen(false)}
+                  desktopDock
                 />
               </div>
               <SidebarResizeHandle
@@ -2739,6 +2260,18 @@ function Shell({
               onOpenChange={(open) => setMobileSidebarOpen(open)}
             >
               <SheetContent
+                ref={mobileSidebarRef}
+                onEscapeKeyDown={(event) => {
+                  if (event.target instanceof Element
+                    && event.target.closest("[data-sidebar-topic-rename]")) {
+                    event.preventDefault();
+                  }
+                }}
+                onOpenAutoFocus={(event) => {
+                  // Keep opening navigation from focusing the search tooltip trigger.
+                  event.preventDefault();
+                  mobileSidebarRef.current?.focus({ preventScroll: true });
+                }}
                 side="left"
                 showCloseButton={false}
                 aria-describedby={undefined}
@@ -2764,23 +2297,29 @@ function Shell({
                 activeKey={activeKey}
                 loading={loading}
                 titleOverrides={sidebarState.title_overrides}
+                messageCache={threadMessageCache}
                 onSelect={onSelectSearchResult}
               />
             </Suspense>
           ) : null}
-        <main
+        <main ref={managementMain}
+          data-theme-surface
+          aria-hidden={managingConnections && remoteConnections?.embeddedManagement || undefined}
+          {...(managingConnections && remoteConnections?.embeddedManagement ? { inert: "" } : {})}
           className={cn(
             "relative flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background",
           )}
         >
-            <div
+          <div className={cn("absolute inset-0 flex flex-col", managingConnections && "hidden")}
+            aria-hidden={managingConnections || undefined} {...(managingConnections ? { inert: "" } : {})}>
+            {(view === "chat" || chatVisited) && <div
               className={cn(
                 "absolute inset-0 flex flex-col",
                 view !== "chat" && "hidden",
               )}
             >
-              <ThreadVisibilityContext.Provider value={view === "chat"}>
-                <Suspense fallback={<SurfaceLoadingFallback label={t("chat.loading")} />}>
+              <ThreadVisibilityContext.Provider value={localActive && !managingConnections && view === "chat"}>
+                <Suspense fallback={<StartupShell embedded surface="chat" sidebarExpanded={hostSidebarOpen} />}>
                   <PaneWorkbench
                     panes={renderedWorkbenchPanes}
                     activePaneKey={renderedActivePaneKey}
@@ -2819,16 +2358,19 @@ function Shell({
                         return (
                           <ThreadShell
                             session={activeSession}
-                            sessions={sessions}
+                            sessions={topicSessions}
+                            titleOverrides={sidebarState.title_overrides}
                             title={headerTitle}
                             temporary={temporaryChatRequested}
                             temporaryChatIds={temporaryChatIds}
+                            messageCache={threadMessageCache}
+                            filePreviewStore={filePreviewStore}
+                            draftStore={draftStore}
                             temporaryChatEnabled={temporaryChatEnabled}
                             onTemporaryChatEnabledChange={
                               !activeKey ? onTemporaryChatEnabledChange : undefined
                             }
                             onToggleSidebar={toggleSidebar}
-                            onNewChat={onNewChat}
                             onCreateChat={
                               temporaryChatEnabled ? onCreateTemporaryChat : onCreateChat
                             }
@@ -2847,7 +2389,10 @@ function Shell({
                             workspaceError={workspaceError}
                             onWorkspaceScopeChange={applyWorkspaceScope}
                             settingsSnapshot={settingsSnapshot}
+                            settingsLoading={settingsLoading}
                             onOpenModelSettings={onOpenModelSettings}
+                            onInspectImagePreset={onInspectImagePreset}
+                            onOpenSandboxSettings={onOpenSandboxSettings}
                             skills={skills}
                           />
                         );
@@ -2865,10 +2410,14 @@ function Shell({
                       return (
                         <ThreadShell
                           session={paneSession}
-                          sessions={sessions}
+                          sessions={topicSessions}
+                          titleOverrides={sidebarState.title_overrides}
                           title={pane.title}
+                          temporaryChatIds={temporaryChatIds}
+                          messageCache={threadMessageCache}
+                          filePreviewStore={filePreviewStore}
+                          draftStore={draftStore}
                           onToggleSidebar={toggleSidebar}
-                          onNewChat={onNewChat}
                           onCreateChat={onCreateChat}
                           pendingFirstMessage={pendingAutomationMessage}
                           onPendingFirstMessageConsumed={onPendingAutomationMessageConsumed}
@@ -2885,7 +2434,9 @@ function Shell({
                           headerPortalTarget={context.headerPortalTarget}
                           headerActive={context.active}
                           composerPortalTarget={context.composerPortalTarget}
+                          navigationFrame={context.navigationFrame}
                           composerActive={context.active}
+                          multiplePanes={context.multiplePanes}
                           composerInputAriaLabel={t("workbench.composerAria", {
                             title: pane.title,
                           })}
@@ -2906,7 +2457,10 @@ function Shell({
                             client.setWorkspaceScope(paneSession.chatId, next);
                           }}
                           settingsSnapshot={settingsSnapshot}
+                          settingsLoading={settingsLoading}
                           onOpenModelSettings={onOpenModelSettings}
+                          onInspectImagePreset={onInspectImagePreset}
+                          onOpenSandboxSettings={onOpenSandboxSettings}
                           skills={skills}
                         />
                       );
@@ -2914,24 +2468,32 @@ function Shell({
                   />
                 </Suspense>
               </ThreadVisibilityContext.Provider>
-            </div>
+            </div>}
             {view !== "chat" && (
               <div className="absolute inset-0 flex flex-col">
-                <Suspense fallback={<SurfaceLoadingFallback />}>
+                {view === "remote" ? <LazyRemoteConnectionsPage
+                  mainNavigationExpanded={showMainSidebar && hostSidebarOpen}
+                  hostChromeInset={showHostChrome}
+                  onBackToChat={onBackToChat}
+                /> : <Suspense fallback={<StartupShell embedded surface={view === "apps" && isAppsSection(settingsInitialSection) ? settingsInitialSection : view} sidebarExpanded={hostSidebarOpen} />}>
                   <SettingsView
                     registerExitGuard={registerSettingsExitGuard}
-                    theme={theme}
+                    themePreference={themePreference}
                     initialSection={settingsInitialSection}
+                    focusTarget={settingsFocus}
                     initialSettings={settingsSnapshot}
                     showSidebar={view === "settings"}
                     mainNavigationExpanded={showMainSidebar && hostSidebarOpen}
-                    onToggleTheme={toggle}
+                    onChangeTheme={setTheme}
                     onBackToChat={onBackToChat}
                     onModelNameChange={onModelNameChange}
                     onSettingsChange={setSettingsSnapshot}
                     skills={skills}
+                    skillsLoading={skillsLoading}
+                    skillsError={skillsError}
                     onStartAutomationChat={onStartAutomationChat}
                     titleOverrides={sidebarState.title_overrides}
+                    sessions={topicSessions}
                     onSectionChange={onSettingsSectionChange}
                     onLogout={onLogout}
                     onRestart={onRestart}
@@ -2939,37 +2501,23 @@ function Shell({
                     isRestarting={isRestarting}
                     hostChromeInset={showHostChrome}
                   />
-                </Suspense>
+                </Suspense>}
               </div>
             )}
+          </div>
+          {managingConnections && !remoteConnections?.embeddedManagement && <div className="absolute inset-0 flex flex-col">
+            <LazyRemoteConnectionsPage
+              mainNavigationExpanded={showMainSidebar && hostSidebarOpen}
+              hostChromeInset={showHostChrome}
+              onBackToChat={() => remoteConnections?.closeManagement()}
+            />
+          </div>}
           </main>
         </div>
 
-        {pendingDelete ? (
-          <Suspense fallback={null}>
-            <DeleteConfirm
-              open
-              title={pendingDelete.items[0]?.label ?? ""}
-              count={pendingDelete.items.length}
-              automations={pendingDelete.automations}
-              onCancel={() => setPendingDelete(null)}
-              onConfirm={onConfirmDelete}
-            />
-          </Suspense>
-        ) : null}
-        {pendingRename ? (
-          <Suspense fallback={null}>
-            <RenameChatDialog
-              open
-              title={pendingRename.label}
-              onCancel={() => setPendingRename(null)}
-              onConfirm={onConfirmRename}
-            />
-          </Suspense>
-        ) : null}
         {pendingTabRename ? (
           <Suspense fallback={null}>
-            <RenameChatDialog
+            <RenameDialog
               open
               title={pendingTabRename.label}
               dialogTitle={t("workbench.renameGroupTitle")}
@@ -2982,7 +2530,7 @@ function Shell({
         ) : null}
         {pendingProjectRename ? (
           <Suspense fallback={null}>
-            <RenameChatDialog
+            <RenameDialog
               open
               title={pendingProjectRename.label}
               dialogTitle={t("chat.renameProjectTitle")}
@@ -2993,27 +2541,7 @@ function Shell({
             />
           </Suspense>
         ) : null}
-        {restartToast ? (
-          <div className="fixed left-1/2 top-[calc(0.75rem+env(safe-area-inset-top))] z-50 flex w-[min(32rem,calc(100vw-1rem))] -translate-x-1/2 flex-col items-center gap-2">
-            <div
-              role="status"
-              className={cn(
-                floatingSurfaceElevationClassName,
-                "max-w-full rounded-full px-4 py-2 text-sm font-medium",
-              )}
-            >
-              {restartToast}
-            </div>
-          </div>
-        ) : null}
-        <PairingCodePopup
-          requests={visiblePairingRequests}
-          total={visiblePairingRequests.length}
-          busyCode={pairingBusyCode}
-          error={pairingError}
-          onApprove={(code) => void onPairingAction("approve", code)}
-          onDismiss={onDismissPairingRequest}
-        />
+        <ChannelPairing />
       </div>
     </ThemeProvider>
   );
